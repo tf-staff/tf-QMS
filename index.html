@@ -1,0 +1,1530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TF-QMS — Trello Power-Up</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<!-- ============================================================
+  TF-QMS  ·  UC Davis Tech Foundry QMS Power-Up
+  ------------------------------------------------------------
+  CHANGE LOGGING (standing instruction for all future editors,
+  human or AI): before considering ANY modification to this file
+  complete, add an entry to CHANGELOG.md at the repo root (date,
+  author, summary of what changed and why, files touched) and
+  bump QMS.VERSION (defined in the CORE FRAMEWORK script
+  block below). This is the ONLY source file — all core framework
+  and module code lives in the script blocks at the bottom of this
+  page. New modules are added as a NEW script block registering via
+  QMS.register(); existing blocks are never modified for that.
+  ------------------------------------------------------------
+  This one hosted page serves every role, chosen at load time by
+  the ?view= query parameter (same pattern as TF-Recharge /
+  TF-Message / TF-Plan):
+    (no view)          connector — hidden iframe; registers capabilities
+    ?view=section      combined card-back section (all active modules)
+    ?view=classify     Card Type popup (Board 1)
+    ?view=intake       Edit Intake Info popup form
+    ?view=maintlog     Log Maintenance Event popup form
+    ?view=inspectlog   Log Inspection Result popup form
+    ?view=overview     board-level overview modal (&kind=maint|intake|holdfail)
+    ?view=access       Manage QMS Access modal
+    ?view=info         Power-Up Info popup (version + latest change)
+  All internal iframe URLs are stamped with &v=VERSION&cb=Date.now()
+  — hard-learned lesson: Trello's connector caching will serve
+  stale code otherwise.
+  All code lives in this file: the CORE FRAMEWORK script block,
+  then one self-contained script block per module.
+============================================================ -->
+<style>
+  .ckgrid{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;margin-top:2px}
+  .ck{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:2px 0}
+  .ck input{margin:0}
+  /* Trello sets data-color-mode="light|dark" on <html>; adapt to both. */
+  :root{
+    --bg:#242528; --panel:#2b2c2f;
+    --subtle:rgba(255,255,255,.06); --subtle-h:rgba(255,255,255,.12);
+    --line:#46474b; --text:#cecfd2; --dim:#96999e; --dimmer:#85878c;
+    --head:#e2e3e5; --blue:#579dff; --green:#4bce97; --red:#f87168;
+    --yellow:#f5cd47; --orange:#fca362;
+  }
+  html[data-color-mode="light"]{
+    --bg:#ffffff; --panel:#f1f2f4;
+    --subtle:rgba(0,0,0,.05); --subtle-h:rgba(0,0,0,.09);
+    --line:#dcdfe4; --text:#292a2e; --dim:#6b6e76; --dimmer:#8a8d94;
+    --head:#1d2125; --blue:#1d7afc; --green:#22a06b; --red:#e2483d;
+    --yellow:#b38600; --orange:#d97008;
+  }
+  *{box-sizing:border-box}
+  html{background:transparent}
+  html,body{margin:0}
+  body{background:transparent; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:13px; -webkit-font-smoothing:antialiased; line-height:1.45; padding:0}
+  body.mode-modal{padding:14px 16px 16px; background:var(--bg)}
+  body.mode-popup{padding:10px 12px 12px}
+  body.mode-section{padding:2px 4px 6px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ---- shared vocabulary (matches the TF-Recharge family) ---- */
+  .sv-label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+  .ghead{display:flex; align-items:baseline; gap:10px; padding:11px 2px 6px; margin-top:6px; border-top:1px solid var(--line)}
+  .ghead:first-child{border-top:0; margin-top:0; padding-top:2px}
+  .ghead .gname{font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--head); font-weight:800}
+  .ghead .gsub{margin-left:auto; font-size:11.5px; color:var(--dimmer)}
+  .qbtn{appearance:none; cursor:pointer; font:inherit; font-weight:700; font-size:12px; border-radius:6px; padding:7px 13px; border:0}
+  .qbtn.save{background:var(--blue); color:#1d2125}
+  html[data-color-mode="light"] .qbtn.save{color:#fff}
+  .qbtn.save:hover{filter:brightness(1.08)}
+  .qbtn.cancel{background:var(--subtle); color:var(--dim)}
+  .qbtn.cancel:hover{background:var(--subtle-h); color:var(--text)}
+  .qbtn.alt{background:transparent; color:var(--blue); border:1px solid rgba(87,157,255,.5)}
+  .qbtn.alt:hover{background:rgba(87,157,255,.12)}
+  .qbtn.danger{background:transparent; color:var(--red); border:1px solid rgba(248,113,104,.5)}
+  .qbtn.danger:hover{background:rgba(248,113,104,.12)}
+  .qbtn:disabled,.qbtn.dim{opacity:.4; cursor:not-allowed; filter:none}
+  .qbtn.sm{font-size:11.5px; padding:5px 10px}
+  .link{appearance:none; border:0; background:transparent; cursor:pointer; color:var(--dim);
+    font:inherit; font-size:12px; font-weight:600; padding:4px 7px; border-radius:5px}
+  .link:hover{background:var(--subtle); color:var(--text)}
+  .link.blue{color:var(--blue)}
+
+  /* ---- forms ---- */
+  .frm{display:flex; flex-direction:column; gap:9px}
+  .frow{display:flex; flex-direction:column; gap:3px}
+  .frow label{font-size:11px; color:var(--dim); font-weight:700; text-transform:uppercase; letter-spacing:.04em}
+  .min{width:100%; font:inherit; font-size:13px; padding:7px 9px;
+    color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:6px}
+  html[data-color-mode="light"] .min{background:#fff}
+  .min::placeholder{color:var(--dimmer)}
+  .min:focus{outline:0; border-color:var(--blue)}
+  textarea.min{resize:vertical; min-height:56px}
+  select.min{appearance:none; -webkit-appearance:none; cursor:pointer; padding-right:26px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 3l3 3 3-3' stroke='%239fadbc' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat:no-repeat; background-position:right 9px center}
+  .fgrid2{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+  .facts{display:flex; gap:8px; justify-content:flex-end; margin-top:4px; align-items:center}
+  .facts .note{margin-right:auto; font-size:11px; color:var(--dimmer)}
+  .fwarn{font-size:11.5px; font-weight:600; color:var(--red)}
+  .fwarn[hidden]{display:none}
+
+  /* ---- card-back section blocks ---- */
+  .qsec{margin-bottom:2px}
+  .fieldgrid{display:grid; grid-template-columns:max-content 1fr; column-gap:14px; row-gap:3px; padding:2px 2px 6px}
+  .fieldgrid .fk{font-size:11.5px; color:var(--dim); font-weight:600; white-space:nowrap}
+  .fieldgrid .fv{font-size:12.5px; color:var(--text); min-width:0; overflow-wrap:anywhere}
+  .fieldgrid .fv.empty{color:var(--dimmer); font-style:italic}
+  .chip{display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; border:1px solid var(--line); color:var(--dim)}
+  .chip.green{color:var(--green); border-color:rgba(75,206,151,.5); background:rgba(75,206,151,.10)}
+  .chip.yellow{color:var(--yellow); border-color:rgba(245,205,71,.5); background:rgba(245,205,71,.10)}
+  .chip.red{color:var(--red); border-color:rgba(248,113,104,.5); background:rgba(248,113,104,.10)}
+  .chip.orange{color:var(--orange); border-color:rgba(252,163,98,.5); background:rgba(252,163,98,.10)}
+  .chip.gray{color:var(--dim)}
+  .secacts{display:flex; align-items:center; gap:8px; padding:2px 2px 4px; flex-wrap:wrap}
+  .secacts .why{font-size:11px; color:var(--dimmer)}
+  .loghead{display:flex; align-items:center; gap:8px; padding:7px 2px 3px}
+  .loghead .sv-label{flex:1 1 auto}
+  .le{display:flex; gap:9px; align-items:flex-start; padding:5px 2px; border-top:1px solid var(--line); font-size:12px}
+  .le:first-of-type{border-top:0}
+  .le .lts{flex:0 0 70px; color:var(--dimmer); display:flex; flex-direction:column; line-height:1.25}
+  .le .lts .d{font-weight:700; color:var(--dim)}
+  .le .lbody{flex:1 1 auto; min-width:0}
+  .le .lbody .l1{display:flex; align-items:center; gap:7px; flex-wrap:wrap}
+  .le .lbody .lnm{font-weight:700; color:var(--text)}
+  .le .lbody .lby{color:var(--dimmer); font-size:11.5px}
+  .le .lbody .lnote{color:var(--dim); margin-top:1px; white-space:pre-wrap; overflow-wrap:anywhere}
+  .le .lbody a{color:var(--blue); text-decoration:none; font-size:11.5px}
+  .le .lbody a:hover{text-decoration:underline}
+  .le .ledit{flex:0 0 auto}
+  .le.edited .lts .d::after{content:" ·"; color:var(--dimmer)}
+  .empty{padding:7px 2px; color:var(--dimmer); font-size:12px; font-style:italic}
+  .capwarn{margin:5px 0 2px; font-size:11px; color:var(--yellow); font-weight:600}
+
+  /* ---- classify block ---- */
+  .classify{display:flex; flex-direction:column; gap:7px; padding:4px 2px 6px}
+  .classify .cq{font-size:13px; font-weight:700; color:var(--head)}
+  .classify .cx{font-size:12px; color:var(--dim)}
+  .cbtns{display:flex; gap:8px; flex-wrap:wrap}
+
+  /* ---- overview modal ---- */
+  .ovhead{display:flex; align-items:baseline; gap:10px; margin-bottom:8px}
+  .ovhead .ovt{font-size:15px; font-weight:800; color:var(--head)}
+  .ovhead .ovn{margin-left:auto; font-size:12px; color:var(--dimmer)}
+  .ove{display:grid; grid-template-columns:1fr max-content max-content; gap:10px; align-items:center;
+    padding:7px 8px; border-top:1px solid var(--line); cursor:pointer; border-radius:6px}
+  .ove:hover{background:var(--subtle)}
+  .ove .ovc{min-width:0}
+  .ove .ovc .cn{font-weight:700; font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .ove .ovc .cl{font-size:11px; color:var(--dimmer)}
+  .ove .ovd{font-size:11.5px; color:var(--dim); white-space:nowrap}
+
+  /* ---- access modal ---- */
+  .mrow{display:flex; align-items:center; gap:10px; padding:6px 4px; border-top:1px solid var(--line)}
+  .mrow:first-of-type{border-top:0}
+  .mrow .mn{flex:1 1 auto; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .mrow .mu{color:var(--dimmer); font-size:11.5px}
+  .notice{border:1px solid var(--line); border-radius:8px; background:var(--subtle); padding:9px 11px; font-size:12px; color:var(--dim); margin:6px 0}
+  .notice b{color:var(--text)}
+  .notice.warn{border-color:rgba(245,205,71,.45)}
+
+  /* ---- info popup ---- */
+  .inf{display:flex; flex-direction:column; gap:6px; padding:2px}
+  .inf .iv{font-size:16px; font-weight:800; color:var(--head)}
+  .inf .is{font-size:12px; color:var(--dim)}
+  .inf .im{font-size:11px; color:var(--dimmer)}
+
+  .savechip{font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .savechip.ok{color:var(--green);border-color:rgba(75,206,151,.45)}
+  .savechip.err{color:var(--red);border-color:rgba(248,113,104,.45)}
+  .savechip:empty{display:none}
+
+  /* standalone landing (file opened directly in a browser) */
+  .standalone{max-width:640px; margin:40px auto; background:var(--panel); border-radius:10px; padding:20px 24px}
+  .standalone h1{font-size:16px; margin:0 0 8px; color:var(--head)}
+  .standalone p{color:var(--dim); font-size:13px}
+  .standalone code{background:var(--subtle); padding:1px 5px; border-radius:4px; font-size:12px}
+  #verBadge{position:fixed; right:7px; bottom:6px; font-size:10px; color:#5b6b7a; opacity:.6; z-index:9; pointer-events:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="verBadge"></div>
+
+<script>
+/* ================= CORE FRAMEWORK ================= */
+var QMS = window.QMS = {};
+
+/* ----- identity / configuration ----- */
+QMS.VERSION = '1.2';
+/* Fallback shown by Power-Up Info if CHANGELOG.md can't be fetched.
+   Keep in sync with the most recent CHANGELOG.md summary line. */
+QMS.LAST_CHANGE = 'Domain iteration: TF equipment categories w/ PM checklists & suggested intervals, calibration as-left results, intake service catalog + site + billing ref + decline reason + RUSH badge, inspection reason codes + measurement-tool traceability.';
+
+/* Native due-date sync (Module 1) requires the Trello REST API.
+   Paste the Power-Up's API key from https://trello.com/power-ups/admin
+   (Power-Up → API Key tab). If left blank, due-date sync is skipped
+   gracefully and only the QMS badge reflects Next Due. */
+QMS.APP_KEY  = '';
+QMS.APP_NAME = 'TF-QMS';
+
+/* Pin the two board IDs here after install (Board menu → ... → the ID
+   is in the board URL, or run t.board('id') from the console). Until
+   pinned, boards are matched by name pattern — fine for first run,
+   but IDs are the durable contract. */
+QMS.BOARD_IDS = {
+  ops:   '',   // "UC Davis Tech Foundry Daily Operations"
+  equip: ''    // "Equipment and Maintenance"
+};
+QMS.BOARD_NAME_PATTERNS = { ops:/daily\s*operations/i, equip:/equipment/i };
+
+/* Which modules are active on which board kind. Future modules append
+   their id here (or to a new board kind) — nothing else changes. */
+QMS.BOARD_MODULES = {
+  equip: ['equipment'],
+  ops:   ['intake','inspection']
+};
+
+/* Append-only log discipline: entries are editable by their original
+   author for this window after creation, and never deletable. */
+QMS.EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;   // 24 h
+
+/* Trello caps Power-Up storage (~4096 chars per value). When a log's
+   serialized size passes this budget, the oldest entries are compacted
+   (notes/attachment links stripped, date/type/author kept) rather than
+   deleted, and the section shows an archive warning. */
+QMS.LOG_BYTE_BUDGET = 3600;
+
+QMS.SELF = location.origin + location.pathname;
+QMS.ICON = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#888888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>');
+
+/* ----- tiny helpers ----- */
+QMS.getParam = function(n){ try{ return new URLSearchParams(location.search).get(n); }catch(e){ return null; } };
+QMS.esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+QMS.el = function(html){ var d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; };
+
+/* Version-stamped internal URL — the anti-stale-cache lesson from the
+   TF Power-Up family: every iframe URL carries v + cb. */
+QMS.url = function(view, params){
+  var u = QMS.SELF + '?view=' + encodeURIComponent(view) + '&v=' + QMS.VERSION + '&cb=' + Date.now();
+  if(params) Object.keys(params).forEach(function(k){
+    if(params[k]!==undefined && params[k]!==null) u += '&' + k + '=' + encodeURIComponent(params[k]);
+  });
+  return u;
+};
+
+/* ----- dates (stored as 'YYYY-MM-DD', local) ----- */
+QMS.todayStr = function(){
+  var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+};
+QMS.addDays = function(ymd, n){
+  var p=(ymd||'').split('-'); if(p.length!==3) return null;
+  var d=new Date(+p[0], +p[1]-1, +p[2]); d.setDate(d.getDate()+ (+n||0));
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+};
+QMS.daysUntil = function(ymd){
+  var p=(ymd||'').split('-'); if(p.length!==3) return null;
+  var t=new Date(); t=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+  var d=new Date(+p[0], +p[1]-1, +p[2]);
+  return Math.round((d-t)/86400000);
+};
+QMS.fmtDate = function(ymd){
+  var p=(ymd||'').split('-'); if(p.length!==3) return ymd||'';
+  var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return M[+p[1]-1]+' '+(+p[2])+', '+p[0];
+};
+
+/* ----- board / member / whitelist ----- */
+QMS.boardKind = function(t){
+  return t.board('id','name').then(function(b){
+    if(QMS.BOARD_IDS.equip && b.id===QMS.BOARD_IDS.equip) return 'equip';
+    if(QMS.BOARD_IDS.ops   && b.id===QMS.BOARD_IDS.ops)   return 'ops';
+    if(QMS.BOARD_IDS.equip || QMS.BOARD_IDS.ops){ /* IDs pinned; fall through to names only for the unpinned one */ }
+    if(QMS.BOARD_NAME_PATTERNS.equip.test(b.name)) return 'equip';
+    if(QMS.BOARD_NAME_PATTERNS.ops.test(b.name))   return 'ops';
+    return null;
+  }).catch(function(){ return null; });
+};
+QMS.me = function(t){ return t.member('id','fullName','username'); };
+/* Whitelist is board-scoped shared storage: [{id, n}] — a member may be
+   whitelisted on one board and not the other. NOTE: this is a client-side
+   UI restriction only (see README) — a Power-Up with no backend cannot
+   cryptographically enforce permissions; it deters casual edits. */
+QMS.getWl = function(t){ return t.get('board','shared','qmsWl').then(function(v){ return Array.isArray(v)?v:[]; }).catch(function(){ return []; }); };
+QMS.setWl = function(t, wl){ return t.set('board','shared','qmsWl', wl); };
+QMS.isWl = function(t){
+  return Promise.all([QMS.getWl(t), QMS.me(t)]).then(function(r){
+    var wl=r[0], me=r[1];
+    return wl.some(function(e){ return e && e.id===me.id; });
+  }).catch(function(){ return false; });
+};
+
+/* ----- module registry ----- */
+QMS.modules = {};
+QMS.register = function(mod){ QMS.modules[mod.id] = mod; };
+QMS.activeModules = function(kind){
+  return (QMS.BOARD_MODULES[kind]||[]).map(function(id){ return QMS.modules[id]; }).filter(Boolean);
+};
+
+/* ----- log utilities (shared by equipment + inspection modules) -----
+   Entry shape: { t:createdMs, d:'YYYY-MM-DD', by:memberId, byN:name,
+                  n:note, att:url, ed:editedMs, ...module fields }
+   Append-only: newest first; edit allowed for author within window;
+   never deleted — compacted (n/att stripped, c:1 flag) if over budget. */
+QMS.appendLog = function(list, entry){
+  var out = [entry].concat(Array.isArray(list)?list:[]);
+  var size = function(){ return JSON.stringify(out).length; };
+  /* pass 1 — strip notes/attachment links, oldest first */
+  for(var i=out.length-1; size()>QMS.LOG_BYTE_BUDGET && i>0; i--){
+    var e = out[i];
+    if(e && !e.rl && (e.n || e.att || e.tl)){ delete e.n; delete e.att; delete e.tl; e.c = 1; }
+  }
+  /* pass 2 — strip author display names on compacted entries (id kept) */
+  for(var j=out.length-1; size()>QMS.LOG_BYTE_BUDGET && j>0; j--){
+    var e2 = out[j];
+    if(e2 && e2.c && e2.byN){ delete e2.byN; }
+  }
+  /* pass 3 — last resort so t.set never hits Trello's ~4 KB hard cap:
+     collapse the oldest compacted entries into a visible roll-up stub
+     { rl:count, f:firstDate, l:lastDate }. Nothing vanishes silently —
+     the stub renders in the section as N rolled-up entries with an
+     instruction to archive the full history to Box. */
+  while(size()>QMS.LOG_BYTE_BUDGET && out.length>2){
+    var last = out[out.length-1];
+    var stub = (last && last.rl) ? out.pop() : { rl:0, f:null, l:null };
+    var victim = out.pop();
+    if(victim && victim.rl){ stub.rl+=victim.rl; stub.f=stub.f&&victim.f?(victim.f<stub.f?victim.f:stub.f):(stub.f||victim.f); stub.l=stub.l&&victim.l?(victim.l>stub.l?victim.l:stub.l):(stub.l||victim.l); }
+    else if(victim){
+      stub.rl += 1;
+      if(!stub.f || (victim.d && victim.d < stub.f)) stub.f = victim.d;
+      if(!stub.l || (victim.d && victim.d > stub.l)) stub.l = victim.d;
+    }
+    out.push(stub);
+  }
+  return { list: out, compacted: out.some(function(e){ return e && (e.c || e.rl); }) };
+};
+QMS.canEdit = function(entry, meId){
+  return entry && entry.by===meId && (Date.now()-(entry.t||0)) < QMS.EDIT_WINDOW_MS;
+};
+
+/* ----- native due-date sync (used by Equipment module) ----- */
+QMS.dueSyncAvailable = function(){ return !!QMS.APP_KEY; };
+QMS.syncNativeDue = function(t, ymd){
+  if(!QMS.APP_KEY) return Promise.resolve({skipped:'nokey'});
+  var api; try{ api = t.getRestApi(); }catch(e){ return Promise.resolve({skipped:'noapi'}); }
+  return api.isAuthorized().then(function(ok){
+    if(!ok) return {skipped:'noauth'};
+    return Promise.all([api.getToken(), t.card('id')]).then(function(r){
+      var iso = new Date(ymd + 'T17:00:00').toISOString();   // 5 pm local on the due day
+      return fetch('https://api.trello.com/1/cards/' + r[1].id +
+                   '?due=' + encodeURIComponent(iso) +
+                   '&key=' + QMS.APP_KEY + '&token=' + encodeURIComponent(r[0]),
+                   { method:'PUT' })
+        .then(function(res){ return res.ok ? {ok:true} : {err:res.status}; });
+    });
+  }).catch(function(e){ return {err:String(e&&e.message||e)}; });
+};
+QMS.authorizeDueSync = function(t){
+  try{
+    return t.getRestApi().authorize({ scope:{read:true, write:true}, expiration:'never' });
+  }catch(e){ return Promise.reject(e); }
+};
+
+/* ----- theme (Trello sets data-color-mode late; poll a few times) ----- */
+QMS.applyTheme = function(t){
+  var apply = function(){
+    var th='dark';
+    try{ var c=t.getContext&&t.getContext(); if(c&&(c.theme==='dark'||c.theme==='light')) th=c.theme; }catch(e){}
+    var a=document.documentElement.getAttribute('data-color-mode');
+    if(a==='dark'||a==='light') th=a;
+    document.documentElement.setAttribute('data-color-mode', th);
+  };
+  apply(); [150,500,1500].forEach(function(ms){ setTimeout(apply, ms); });
+};
+
+/* ============================================================
+   CONNECTOR — registers all capabilities; per-board activation
+============================================================ */
+QMS.initConnector = function(){
+  var initOpts = QMS.APP_KEY ? { appKey:QMS.APP_KEY, appName:QMS.APP_NAME } : undefined;
+
+  window.TrelloPowerUp.initialize({
+
+    /* --- card front badges --- */
+    'card-badges': function(t){
+      return QMS.boardKind(t).then(function(kind){
+        if(!kind) return [];
+        if(kind==='ops'){
+          /* Card Type gate (core): unset → classify prompt; internal → nothing */
+          return t.get('card','shared','qt').then(function(qt){
+            if(!qt) return [{ text:'Classify this card', color:'light-gray' }];
+            if(qt==='int') return [];
+            return Promise.all(QMS.activeModules('ops').map(function(m){
+              return m.badges ? m.badges(t) : [];
+            })).then(function(arrs){ return [].concat.apply([], arrs); });
+          });
+        }
+        return Promise.all(QMS.activeModules(kind).map(function(m){
+          return m.badges ? m.badges(t) : [];
+        })).then(function(arrs){ return [].concat.apply([], arrs); });
+      });
+    },
+
+    /* --- combined card-back section (Trello allows one per Power-Up;
+           the section iframe renders every active module's block) --- */
+    'card-back-section': function(t){
+      return QMS.boardKind(t).then(function(kind){
+        if(!kind) return;
+        var make = function(height){
+          var u = QMS.url('section', { kind:kind });
+          try{ if(t.signUrl) u = t.signUrl(u); }catch(e){}
+          return {
+            title: 'TF-QMS v' + QMS.VERSION,
+            icon: QMS.ICON,
+            content: { type:'iframe', url:u, height:height }
+          };
+        };
+        if(kind==='ops'){
+          return t.get('card','shared','qt').then(function(qt){
+            if(qt==='int') return;              /* Internal: no QMS UI at all */
+            return make(qt ? 340 : 110);        /* job section vs classify prompt */
+          });
+        }
+        return make(330);
+      });
+    },
+
+    /* --- board buttons --- */
+    'board-buttons': function(t){
+      return QMS.boardKind(t).then(function(kind){
+        if(!kind) return [];
+        var modal = function(tt, view, params, title, h){
+          var u = QMS.url(view, params);
+          try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
+          return tt.modal({ url:u, fullscreen:false, height:h||620, title:title, accentColor:'#242528' });
+        };
+        var btns = [];
+        QMS.activeModules(kind).forEach(function(m){
+          (m.boardButtons||[]).forEach(function(b){
+            btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:b.text, callback:function(tt){
+              return modal(tt, 'overview', {kind:b.kind}, b.text, 620);
+            }});
+          });
+        });
+        btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:'Manage QMS Access', callback:function(tt){
+          return modal(tt, 'access', null, 'Manage QMS Access', 520);
+        }});
+        btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:'Power-Up Info', callback:function(tt){
+          var u = QMS.url('info');
+          try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
+          return tt.popup({ title:'TF-QMS', url:u, height:150 });
+        }});
+        return btns;
+      });
+    },
+
+    /* --- card button: reclassify path for Internal cards (whitelist only).
+           Internal cards intentionally show no badge/section; this small
+           whitelisted-only button is how a misclassified card gets fixed. --- */
+    'card-buttons': function(t){
+      return QMS.boardKind(t).then(function(kind){
+        if(kind!=='ops') return [];
+        return Promise.all([t.get('card','shared','qt'), QMS.isWl(t)]).then(function(r){
+          if(r[0]!=='int' || !r[1]) return [];
+          return [{ icon:QMS.ICON, text:'QMS: Card Type', callback:function(tt){
+            var u = QMS.url('classify');
+            try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
+            return tt.popup({ title:'Card Type', url:u, height:170 });
+          }}];
+        });
+      });
+    }
+
+  }, initOpts);
+};
+
+/* ============================================================
+   VIEW ROUTER — every non-connector role of this page
+============================================================ */
+QMS.views = {};   /* modules add their form views here (maintlog, intake, inspectlog) */
+
+QMS.initView = function(view){
+  var t;
+  var iframeOpts = QMS.APP_KEY ? { appKey:QMS.APP_KEY, appName:QMS.APP_NAME } : undefined;
+  try{ t = window._t = window.TrelloPowerUp.iframe(iframeOpts); }catch(e){ t=null; }
+  if(!t) return;
+  QMS.applyTheme(t);
+  var app = document.getElementById('app');
+  var core = { section:QMS.viewSection, classify:QMS.viewClassify, access:QMS.viewAccess,
+               overview:QMS.viewOverview, info:QMS.viewInfo };
+  var fn = core[view] || QMS.views[view];
+  if(fn) fn(t, app);
+};
+
+/* ---- shared: popup sizing ---- */
+QMS.fit = function(t, sel){
+  var f=function(){ try{ t.sizeTo(sel||'#app'); }catch(e){} };
+  f(); [120,400,900].forEach(function(ms){ setTimeout(f, ms); });
+};
+
+/* ============================================================
+   VIEW: combined card-back section
+============================================================ */
+QMS.viewSection = function(t, app){
+  document.body.classList.add('mode-section');
+  var kind = QMS.getParam('kind');
+  var render = function(){
+    Promise.all([ QMS.isWl(t), QMS.me(t),
+                  kind==='ops' ? t.get('card','shared','qt') : Promise.resolve(null) ])
+    .then(function(r){
+      var ctx = { wl:r[0], me:r[1], qt:r[2], refresh:render };
+      app.innerHTML = '';
+      if(kind==='ops' && !ctx.qt){
+        /* neutral classification prompt — the only QMS UI until typed */
+        var c = QMS.el('<div class="classify">' +
+          '<div class="cq">Classify this card</div>' +
+          '<div class="cx">Is this a client job/request, or an internal task, note, or improvement? ' +
+          'QMS intake and inspection tracking only applies to jobs.</div>' +
+          '<div class="cbtns"></div>' +
+          (ctx.wl ? '' : '<div class="secacts"><span class="why">Only QMS-authorized members can set the card type. Ask a QMS admin (Manage QMS Access on the board menu).</span></div>') +
+          '</div>');
+        var btns = c.querySelector('.cbtns');
+        var mk = function(label, val, cls){
+          var b = QMS.el('<button class="qbtn '+cls+'">'+label+'</button>');
+          if(!ctx.wl){ b.disabled = true; }
+          b.onclick = function(){
+            t.set('card','shared','qt', val).then(function(){ render(); });
+          };
+          return b;
+        };
+        btns.appendChild(mk('Job / Request','job','save'));
+        btns.appendChild(mk('Internal (Task / Note / Improvement)','int','cancel'));
+        app.appendChild(c);
+        QMS.fit(t);
+        return;
+      }
+      if(kind==='ops' && ctx.qt==='int'){
+        /* connector hides the section for internal cards; if we're here the
+           type just changed — show a settling note */
+        app.appendChild(QMS.el('<div class="empty">Internal card — no QMS tracking. (This section disappears on reload.)</div>'));
+        QMS.fit(t); return;
+      }
+      var mods = QMS.activeModules(kind);
+      var chain = Promise.resolve();
+      if(kind==='ops'){
+        var head = QMS.el('<div class="secacts"><span class="why">Card type: <b>Job / Request</b></span></div>');
+        if(ctx.wl){
+          var chg = QMS.el('<button class="link">change</button>');
+          chg.onclick = function(){
+            t.popup({ title:'Card Type', url:QMS.url('classify'), height:170 });
+          };
+          head.appendChild(chg);
+        }
+        app.appendChild(head);
+      }
+      mods.forEach(function(m){
+        chain = chain.then(function(){
+          var mount = document.createElement('div'); mount.className='qsec';
+          app.appendChild(mount);
+          return m.section(t, mount, ctx);
+        });
+      });
+      chain.then(function(){ QMS.fit(t); });
+    });
+  };
+  try{ t.render(function(){ QMS.applyTheme(t); render(); }); }catch(e){ render(); }
+  render();
+};
+
+/* ============================================================
+   VIEW: classify popup (reclassification path)
+============================================================ */
+QMS.viewClassify = function(t, app){
+  document.body.classList.add('mode-popup');
+  Promise.all([QMS.isWl(t), t.get('card','shared','qt')]).then(function(r){
+    var wl=r[0], qt=r[1];
+    app.innerHTML='';
+    var c = QMS.el('<div class="classify">' +
+      '<div class="cx">Current type: <b>' + (qt==='job'?'Job / Request': qt==='int'?'Internal':'not set') + '</b>. ' +
+      'Reclassifying does not erase QMS data already on the card; it only changes which QMS sections apply.</div>' +
+      '<div class="cbtns"></div>' +
+      (wl ? '' : '<div class="fwarn">Only QMS-authorized members can change the card type.</div>') +
+      '</div>');
+    var btns=c.querySelector('.cbtns');
+    var mk=function(label,val,cls){
+      var b=QMS.el('<button class="qbtn '+cls+'">'+label+'</button>');
+      if(!wl || qt===val) b.disabled=true;
+      b.onclick=function(){ t.set('card','shared','qt',val).then(function(){ t.closePopup(); }); };
+      return b;
+    };
+    btns.appendChild(mk('Job / Request','job','save'));
+    btns.appendChild(mk('Internal','int','cancel'));
+    app.appendChild(c);
+    QMS.fit(t);
+  });
+};
+
+/* ============================================================
+   VIEW: Manage QMS Access (board-scoped whitelist, self-governing)
+============================================================ */
+QMS.viewAccess = function(t, app){
+  document.body.classList.add('mode-modal');
+  var render = function(){
+    Promise.all([QMS.getWl(t), QMS.me(t), t.board('members')]).then(function(r){
+      var wl=r[0], me=r[1], members=(r[2]&&r[2].members)||[];
+      var meIn = wl.some(function(e){ return e.id===me.id; });
+      app.innerHTML='';
+      app.appendChild(QMS.el('<div class="ovhead"><span class="ovt">Manage QMS Access</span>' +
+        '<span class="ovn">' + wl.length + ' authorized</span></div>'));
+
+      if(wl.length===0){
+        /* Seeding: with an empty whitelist there is no one to approve anyone,
+           so the first board member to claim admin becomes the seed entry.
+           (Documented in README; do this immediately after enabling the
+           Power-Up on each board.) */
+        var seed = QMS.el('<div class="notice warn"><b>No QMS members yet on this board.</b> ' +
+          'The whitelist is self-governing once seeded — claim the first entry now, then add the rest of the team below. ' +
+          'Do this right after installing, before the board is in active QMS use.</div>');
+        var sb = QMS.el('<button class="qbtn save">Add myself (' + QMS.esc(me.fullName||me.username) + ') as first QMS member</button>');
+        sb.onclick = function(){
+          QMS.setWl(t, [{id:me.id, n:me.fullName||me.username}]).then(render);
+        };
+        app.appendChild(seed); app.appendChild(sb);
+        QMS.fit(t); return;
+      }
+
+      if(!meIn){
+        app.appendChild(QMS.el('<div class="notice">You are not on this board\u2019s QMS whitelist, so this list is read-only for you. ' +
+          'Ask one of the members below to add you.</div>'));
+      }
+
+      app.appendChild(QMS.el('<div class="ghead"><span class="gname">Authorized members</span></div>'));
+      wl.forEach(function(e){
+        var row = QMS.el('<div class="mrow"><span class="mn">' + QMS.esc(e.n||e.id) + '</span></div>');
+        if(meIn){
+          var rm = QMS.el('<button class="qbtn danger sm">Remove</button>');
+          if(e.id===me.id && wl.length===1){ rm.disabled=true; rm.title='At least one QMS member must remain — add another member first.'; }
+          rm.onclick=function(){
+            QMS.setWl(t, wl.filter(function(x){ return x.id!==e.id; })).then(render);
+          };
+          row.appendChild(rm);
+        }
+        app.appendChild(row);
+      });
+
+      if(meIn){
+        app.appendChild(QMS.el('<div class="ghead"><span class="gname">Add from board members</span></div>'));
+        var candidates = members.filter(function(m){ return !wl.some(function(e){ return e.id===m.id; }); });
+        if(!candidates.length){
+          app.appendChild(QMS.el('<div class="empty">Every board member is already authorized.</div>'));
+        }
+        candidates.forEach(function(m){
+          var row = QMS.el('<div class="mrow"><span class="mn">' + QMS.esc(m.fullName||m.username) +
+            '</span><span class="mu">@' + QMS.esc(m.username||'') + '</span></div>');
+          var ad = QMS.el('<button class="qbtn alt sm">Add</button>');
+          ad.onclick=function(){
+            QMS.setWl(t, wl.concat([{id:m.id, n:m.fullName||m.username}])).then(render);
+          };
+          row.appendChild(ad);
+          app.appendChild(row);
+        });
+      }
+
+      app.appendChild(QMS.el('<div class="notice">Heads-up: this whitelist is enforced in the Power-Up\u2019s UI only. ' +
+        'A Power-Up without a backend server cannot cryptographically enforce permissions \u2014 it deters casual edits by ' +
+        'non-authorized members, but a determined user with board access could bypass it. Controlled records of truth remain in Box.</div>'));
+      QMS.fit(t);
+    });
+  };
+  try{ t.render(function(){ QMS.applyTheme(t); }); }catch(e){}
+  render();
+};
+
+/* ============================================================
+   VIEW: overview modal shell — kind resolved to a module handler
+   (modules declare: overviews:[{kind, title, collect(t) -> rows}])
+============================================================ */
+QMS.viewOverview = function(t, app){
+  document.body.classList.add('mode-modal');
+  var kind = QMS.getParam('kind');
+  var def = null;
+  Object.keys(QMS.modules).forEach(function(id){
+    (QMS.modules[id].overviews||[]).forEach(function(o){ if(o.kind===kind) def=o; });
+  });
+  if(!def){ app.innerHTML='<div class="empty">Unknown overview.</div>'; return; }
+  app.innerHTML = '<div class="ovhead"><span class="ovt">' + QMS.esc(def.title) + '</span><span class="ovn">loading…</span></div>' +
+                  '<div class="empty">Scanning cards…</div>';
+  Promise.all([ t.lists('id','name'), def.collect(t) ]).then(function(r){
+    var lists={}; (r[0]||[]).forEach(function(l){ lists[l.id]=l.name; });
+    var rows=r[1]||[];
+    app.innerHTML = '<div class="ovhead"><span class="ovt">' + QMS.esc(def.title) + '</span>' +
+      '<span class="ovn">' + rows.length + ' card' + (rows.length===1?'':'s') + '</span></div>';
+    if(!rows.length){
+      app.appendChild(QMS.el('<div class="empty">' + QMS.esc(def.empty||'Nothing to show — all clear.') + '</div>'));
+      QMS.fit(t); return;
+    }
+    rows.forEach(function(row){
+      var e = QMS.el('<div class="ove">' +
+        '<span class="ovc"><span class="cn">' + QMS.esc(row.name) + '</span>' +
+        '<span class="cl">' + QMS.esc(lists[row.idList]||'') + '</span></span>' +
+        '<span class="chip ' + (row.color||'gray') + '">' + QMS.esc(row.status) + '</span>' +
+        '<span class="ovd num">' + QMS.esc(row.detail||'') + '</span></div>');
+      e.onclick=function(){ try{ t.showCard(row.id); }catch(err){} };
+      app.appendChild(e);
+    });
+    QMS.fit(t);
+  });
+};
+
+/* ============================================================
+   VIEW: Power-Up Info — version + latest CHANGELOG.md summary
+============================================================ */
+QMS.viewInfo = function(t, app){
+  document.body.classList.add('mode-popup');
+  var show = function(summary, meta){
+    app.innerHTML = '<div class="inf">' +
+      '<span class="iv">TF-QMS v' + QMS.VERSION + '</span>' +
+      '<span class="is">' + QMS.esc(summary) + '</span>' +
+      (meta ? '<span class="im">' + QMS.esc(meta) + '</span>' : '') +
+      '<span class="im">UC Davis Tech Foundry \u00b7 full history in CHANGELOG.md</span></div>';
+    QMS.fit(t);
+  };
+  show(QMS.LAST_CHANGE, '');
+  /* Prefer the live CHANGELOG.md (single source of truth), fall back to constant. */
+  fetch(QMS.SELF.replace(/[^\/]*$/, '') + 'CHANGELOG.md?cb=' + Date.now())
+    .then(function(r){ return r.ok ? r.text() : null; })
+    .then(function(txt){
+      if(!txt) return;
+      /* first entry = first "## " heading + its first "Summary:" line */
+      var m = txt.match(/^## \[?v?([\d.]+)\]?[^\n]*\n([\s\S]*?)(?=\n## |\n*$)/m);
+      if(!m) return;
+      var body = m[2];
+      var sm = body.match(/Summary:\s*(.+)/);
+      var dm = body.match(/Date:\s*(.+)/);
+      var am = body.match(/Author:\s*(.+)/);
+      show(sm ? sm[1].trim() : QMS.LAST_CHANGE,
+           [dm&&dm[1].trim(), am&&('by '+am[1].trim())].filter(Boolean).join(' \u00b7 '));
+    })
+    .catch(function(){});
+};
+</script>
+<script>
+/* ============ MODULE: EQUIPMENT MAINTENANCE & CALIBRATION ============ */
+(function(){
+
+var TYPES = { cal:'Calibration', pm:'Preventive Maintenance', rep:'Repair', insp:'Inspection' };
+var INTERVALS = [30,60,90,180,365];
+/* Equipment categories reflect the actual TF fleet across GBSF and Aggie
+   Square. Each carries a suggested interval and a PM checklist hint that
+   surfaces in the log form — suggestions only, never auto-enforced. */
+var CATS = {
+  cnc:{ n:'CNC mill / lathe',                   iv:90,  h:'Way lube, coolant concentration & pH, chip/level check, tram & indicate, spindle warm-up.' },
+  fdm:{ n:'FDM printer',                        iv:90,  h:'Nozzle & hotend/PTFE, belt tension, bed level & build surface, Z-axis lube.' },
+  sla:{ n:'SLA printer',                        iv:90,  h:'Resin tank & wiper condition, optical window/glass, resin filter, firmware current.' },
+  sls:{ n:'SLS / MJF printer',                  iv:30,  h:'Printheads & lamps per OEM schedule, sieve/recycle station, chamber glass, filters.' },
+  pj: { n:'PolyJet printer',                    iv:30,  h:'Head cleaning & pattern test, roller & wiper, UV lamp hours.' },
+  lc: { n:'Laser cutter',                       iv:30,  h:'Lens & mirror optics, rail/rack cleaning, extraction & filtration flow check, beam alignment. Filtration/extraction is also a fire-safety control — log it every time.' },
+  met:{ n:'Metrology (calipers, mics, gauges)', iv:365, h:'External NIST-traceable calibration. Attach the cert (Box link) — that link is the traceability chain.' },
+  pp: { n:'Post-processing (wash/cure, dye, blast)', iv:90, h:'Solvent/media condition, seals & gaskets, verify timers & temps against setpoints.' },
+  oth:{ n:'Other', iv:null, h:'' }
+};
+/* Calibration as-found/as-left, the distinction reviewers actually ask for. */
+var CAL_RESULTS = { it:'Found in tolerance', adj:'Adjusted to tolerance', oot:'Out of tolerance — limited / removed from service' };
+var DUE_SOON_DAYS = 14;
+
+function getMt(t, cardId){
+  var g = cardId ? t.get(cardId,'shared','mt') : t.get('card','shared','mt');
+  return g.then(function(v){ return (v&&typeof v==='object')?v:{}; }).catch(function(){ return {}; });
+}
+function getLog(t){
+  return t.get('card','shared','mtl').then(function(v){ return Array.isArray(v)?v:[]; }).catch(function(){ return []; });
+}
+function nextDue(mt){
+  if(!mt || !mt.ls || !mt.iv) return null;
+  return QMS.addDays(mt.ls, mt.iv);
+}
+function status(mt){
+  var due = nextDue(mt);
+  if(!due) return { s:'none', due:null };
+  var d = QMS.daysUntil(due);
+  if(d < 0) return { s:'red', due:due, d:d };
+  if(d <= DUE_SOON_DAYS) return { s:'yellow', due:due, d:d };
+  return { s:'green', due:due, d:d };
+}
+
+QMS.register({
+  id: 'equipment',
+
+  /* ---- card-front badge: the primary at-a-glance indicator ---- */
+  badges: function(t){
+    return getMt(t).then(function(mt){
+      var st = status(mt);
+      if(st.s==='none')   return [{ text:'Maint: not logged', color:'light-gray', refresh:3600 }];
+      if(st.s==='red')    return [{ text:'Maint OVERDUE \u00b7 ' + QMS.fmtDate(st.due), color:'red', refresh:3600 }];
+      if(st.s==='yellow') return [{ text:'Maint due ' + QMS.fmtDate(st.due), color:'yellow', refresh:3600 }];
+      return [{ text:'Maint OK \u00b7 next ' + QMS.fmtDate(st.due), color:'green', refresh:3600 }];
+    });
+  },
+
+  /* ---- board button: Maintenance Overview (yellow + red cards) ---- */
+  boardButtons: [ { text:'Maintenance Overview', kind:'maint' } ],
+  overviews: [{
+    kind:'maint',
+    title:'Maintenance Overview \u2014 due soon & overdue',
+    empty:'No equipment is due within ' + DUE_SOON_DAYS + ' days or overdue. All green.',
+    collect: function(t){
+      return t.cards('id','name','idList').then(function(cards){
+        return Promise.all(cards.map(function(c){
+          return getMt(t, c.id).then(function(mt){
+            var st = status(mt);
+            if(st.s!=='red' && st.s!=='yellow') return null;
+            return { id:c.id, name:c.name, idList:c.idList,
+                     status: st.s==='red' ? 'Overdue' : 'Due soon',
+                     color: st.s,
+                     detail: (st.s==='red' ? Math.abs(st.d)+'d overdue \u00b7 ' : 'in '+st.d+'d \u00b7 ') + QMS.fmtDate(st.due),
+                     sort: st.d };
+          });
+        })).then(function(rows){
+          return rows.filter(Boolean).sort(function(a,b){ return a.sort-b.sort; });
+        });
+      });
+    }
+  }],
+
+  /* ---- card-back section block ---- */
+  section: function(t, mount, ctx){
+    return Promise.all([getMt(t), getLog(t)]).then(function(r){
+      var mt=r[0], log=r[1], st=status(mt);
+      var chip = { none:['gray','Not logged'], green:['green','Up to date'],
+                   yellow:['yellow','Due soon'], red:['red','Overdue'] }[st.s];
+      mount.innerHTML =
+        '<div class="ghead"><span class="gname">Maintenance &amp; Calibration</span>' +
+        '<span class="gsub"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></span></div>' +
+        '<div class="fieldgrid">' +
+        '<span class="fk">Equipment category</span><span class="fv' + (mt.ct?'':' empty') + '">' + ((CATS[mt.ct]||{}).n||'\u2014 not set') + '</span>' +
+        '<span class="fk">Last serviced/calibrated</span><span class="fv' + (mt.ls?'':' empty') + '">' + (mt.ls?QMS.fmtDate(mt.ls):'\u2014 none logged') + '</span>' +
+        '<span class="fk">Maintenance interval</span><span class="fv' + (mt.iv?'':' empty') + '">' + (mt.iv ? (mt.iv + ' days' + (INTERVALS.indexOf(+mt.iv)<0?' (custom)':'')) : '\u2014 not set') + '</span>' +
+        '<span class="fk">Next due (auto)</span><span class="fv' + (st.due?'':' empty') + '">' + (st.due ? QMS.fmtDate(st.due) + (st.d!=null ? (st.d<0 ? ' \u00b7 '+Math.abs(st.d)+'d overdue' : ' \u00b7 in '+st.d+'d') : '') : '\u2014') + '</span>' +
+        '<span class="fk">Last maintenance type</span><span class="fv' + (mt.ty?'':' empty') + '">' + (TYPES[mt.ty]||'\u2014') + '</span>' +
+        '</div>';
+
+      /* actions row */
+      var acts = QMS.el('<div class="secacts"></div>');
+      var logBtn = QMS.el('<button class="qbtn save sm">Log Maintenance Event</button>');
+      if(!ctx.wl){
+        logBtn.disabled = true;
+        acts.appendChild(logBtn);
+        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
+      } else {
+        logBtn.onclick = function(){
+          t.popup({ title:'Log Maintenance Event', url:QMS.url('maintlog'), height:430 });
+        };
+        acts.appendChild(logBtn);
+      }
+      mount.appendChild(acts);
+
+      /* due-date sync state (native card due mirrors Next Due) */
+      if(QMS.dueSyncAvailable()){
+        var api; try{ api = t.getRestApi(); }catch(e){ api=null; }
+        if(api){
+          api.isAuthorized().then(function(ok){
+            if(ok) return;
+            var row = QMS.el('<div class="secacts"><span class="why">Native card due-date sync is off for you \u2014 authorize once to let logged events also set Trello\u2019s own due date (and its reminders).</span></div>');
+            var b = QMS.el('<button class="link blue">Enable</button>');
+            b.onclick = function(){ QMS.authorizeDueSync(t).then(function(){ ctx.refresh(); }, function(){}); };
+            row.appendChild(b);
+            mount.appendChild(row);
+            QMS.fit(t);
+          }).catch(function(){});
+        }
+      } else {
+        mount.appendChild(QMS.el('<div class="secacts"><span class="why">Due-date sync unavailable \u2014 no API key configured (see README \u00a7 due-date sync). Badges still track Next Due.</span></div>'));
+      }
+
+      /* running history — append-only */
+      mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Maintenance log</span>' +
+        '<span class="why">' + log.length + ' entr' + (log.length===1?'y':'ies') + ' \u00b7 append-only</span></div>'));
+      if(log.some(function(e){ return e && (e.c || e.rl); })){
+        mount.appendChild(QMS.el('<div class="capwarn">Storage budget reached \u2014 the oldest entries were compacted (dates, types, and authors preserved where possible). Archive full history to Box.</div>'));
+      }
+      if(!log.length){
+        mount.appendChild(QMS.el('<div class="empty">No maintenance or calibration events logged yet.</div>'));
+      }
+      log.forEach(function(e, i){
+        if(e && e.rl){
+          mount.appendChild(QMS.el('<div class="le"><span class="lts"><span class="d">\u2026</span></span>' +
+            '<span class="lbody"><div class="lnote" style="font-style:italic">' + e.rl + ' older entr' + (e.rl===1?'y':'ies') +
+            ' rolled up (' + QMS.esc(QMS.fmtDate(e.f)) + ' \u2013 ' + QMS.esc(QMS.fmtDate(e.l)) + ') to stay within Trello\u2019s storage cap.</div></span></div>'));
+          return;
+        }
+        var row = QMS.el('<div class="le' + (e.ed?' edited':'') + '">' +
+          '<span class="lts"><span class="d">' + QMS.esc(QMS.fmtDate(e.d)) + '</span>' +
+          (e.ed?'<span>edited</span>':'') + '</span>' +
+          '<span class="lbody"><span class="l1"><span class="lnm">' + QMS.esc(TYPES[e.ty]||e.ty||'') + (e.cr?' \u00b7 '+QMS.esc(CAL_RESULTS[e.cr]||e.cr):'') + '</span>' +
+          '<span class="lby">' + QMS.esc(e.byN||'') + '</span></span>' +
+          (e.n ? '<div class="lnote">' + QMS.esc(e.n) + '</div>' : '') +
+          (e.att ? '<a href="' + QMS.esc(e.att) + '" target="_blank" rel="noopener">attachment \u2197</a>' : '') +
+          (e.c ? '<div class="lnote" style="font-style:italic">note compacted for storage</div>' : '') +
+          '</span></div>');
+        if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
+          var eb = QMS.el('<button class="link ledit">edit</button>');
+          eb.onclick = function(){
+            t.popup({ title:'Edit Maintenance Entry', url:QMS.url('maintlog',{edit:e.t}), height:430 });
+          };
+          row.appendChild(eb);
+        }
+        mount.appendChild(row);
+      });
+    });
+  }
+});
+
+/* ---- popup view: Log Maintenance Event / edit-within-window ---- */
+QMS.views.maintlog = function(t, app){
+  document.body.classList.add('mode-popup');
+  var editTs = QMS.getParam('edit') ? +QMS.getParam('edit') : null;
+
+  Promise.all([getMt(t), getLog(t), QMS.me(t), QMS.isWl(t)]).then(function(r){
+    var mt=r[0], log=r[1], me=r[2], wl=r[3];
+    var editing = editTs ? log.find(function(e){ return e.t===editTs; }) : null;
+    if(editTs && (!editing || !QMS.canEdit(editing, me.id))){
+      app.innerHTML = '<div class="empty">This entry can no longer be edited \u2014 the ' +
+        Math.round(QMS.EDIT_WINDOW_MS/3600000) + '-hour author window has closed. Log entries are never deleted; ' +
+        'add a new entry to correct the record.</div>';
+      QMS.fit(t); return;
+    }
+    if(!wl){
+      app.innerHTML = '<div class="empty">Only QMS-authorized members can log maintenance events.</div>';
+      QMS.fit(t); return;
+    }
+
+    var curIv = editing ? mt.iv : mt.iv;   /* interval prefilled from card either way */
+    var isStd = curIv && INTERVALS.indexOf(+curIv)>=0;
+    app.innerHTML = '';
+    var f = QMS.el('<div class="frm">' +
+      '<div class="frow"><label>Equipment category</label><select class="min" id="fct">' +
+        '<option value="">\u2014 select \u2014</option>' +
+        Object.keys(CATS).map(function(k){ return '<option value="'+k+'">'+CATS[k].n+'</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="frow" id="fhintRow" hidden><span class="why" id="fhint"></span></div>' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Event date</label><input class="min" id="fd" type="date"></div>' +
+        '<div class="frow"><label>Maintenance type</label><select class="min" id="fty">' +
+          Object.keys(TYPES).map(function(k){ return '<option value="'+k+'">'+TYPES[k]+'</option>'; }).join('') +
+        '</select></div>' +
+      '</div>' +
+      '<div class="frow" id="fcrRow" hidden><label>Calibration result (as-left)</label><select class="min" id="fcr">' +
+        Object.keys(CAL_RESULTS).map(function(k){ return '<option value="'+k+'">'+CAL_RESULTS[k]+'</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Maintenance interval</label><select class="min" id="fiv">' +
+          INTERVALS.map(function(d){ return '<option value="'+d+'">'+d+' days</option>'; }).join('') +
+          '<option value="custom">Custom\u2026</option>' +
+        '</select></div>' +
+        '<div class="frow" id="fcustomRow" hidden><label>Custom interval (days)</label>' +
+          '<input class="min num" id="fcustom" type="number" min="1" step="1" placeholder="days"></div>' +
+      '</div>' +
+      '<div class="frow"><label>Notes</label><textarea class="min" id="fn" placeholder="What was done, readings, parts, standards used\u2026"></textarea></div>' +
+      '<div class="frow"><label>Attachment link (optional \u2014 never required)</label>' +
+        '<input class="min" id="fatt" type="url" placeholder="https:// \u2026 Box link to cert, report, photo"></div>' +
+      '<div class="fwarn" id="fwarn" hidden></div>' +
+      '<div class="facts"><span class="note" id="fnote"></span>' +
+        '<button class="qbtn cancel" id="fcancel">Cancel</button>' +
+        '<button class="qbtn save" id="fsave">' + (editing?'Save changes':'Log event') + '</button></div>' +
+      '</div>');
+    app.appendChild(f);
+
+    var $ = function(s){ return f.querySelector(s); };
+    $('#fd').value = editing ? editing.d : QMS.todayStr();
+    $('#fty').value = editing ? (editing.ty||'pm') : (mt.ty||'pm');
+    $('#fct').value = mt.ct||'';
+    if(editing && editing.cr) $('#fcr').value = editing.cr;
+    var syncCat = function(fromUser){
+      var c = CATS[$('#fct').value];
+      $('#fhintRow').hidden = !(c && c.h);
+      if(c && c.h) $('#fhint').textContent = c.n + ' \u2014 typical checks: ' + c.h;
+      /* suggest (not force) the category's interval when the user picks it */
+      if(fromUser && c && c.iv && INTERVALS.indexOf(c.iv)>=0){ $('#fiv').value=String(c.iv); $('#fcustomRow').hidden=true; }
+      QMS.fit(t);
+    };
+    var syncCalRes = function(){ $('#fcrRow').hidden = $('#fty').value!=='cal'; QMS.fit(t); };
+    $('#fct').onchange = function(){ syncCat(true); };
+    $('#fty').onchange = syncCalRes;
+    syncCat(false); syncCalRes();
+    if(curIv && isStd) $('#fiv').value = String(curIv);
+    else if(curIv){ $('#fiv').value='custom'; $('#fcustomRow').hidden=false; $('#fcustom').value=curIv; }
+    $('#fn').value = editing ? (editing.n||'') : '';
+    $('#fatt').value = editing ? (editing.att||'') : '';
+    $('#fiv').onchange = function(){ $('#fcustomRow').hidden = this.value!=='custom'; QMS.fit(t); };
+    var noteBits = [];
+    if(editing) noteBits.push('Editing your entry \u2014 window closes ' + Math.round((editing.t+QMS.EDIT_WINDOW_MS-Date.now())/3600000) + 'h from now');
+    else noteBits.push('Technician: ' + (me.fullName||me.username));
+    $('#fnote').textContent = noteBits.join(' \u00b7 ');
+
+    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fsave').onclick = function(){
+      var d = $('#fd').value;
+      var ivRaw = $('#fiv').value;
+      var iv = ivRaw==='custom' ? parseInt($('#fcustom').value,10) : parseInt(ivRaw,10);
+      var warn = $('#fwarn');
+      if(!d){ warn.textContent='Event date is required.'; warn.hidden=false; QMS.fit(t); return; }
+      if(!iv || iv<1){ warn.textContent='Enter a maintenance interval in days.'; warn.hidden=false; QMS.fit(t); return; }
+      var att = $('#fatt').value.trim();
+      if(att && !/^https?:\/\//i.test(att)){ warn.textContent='Attachment must be a full http(s) link.'; warn.hidden=false; QMS.fit(t); return; }
+      /* soft nudge, not a blocker: a calibration without a cert link breaks
+         the traceability chain \u2014 confirm once, then save anyway */
+      if($('#fty').value==='cal' && !att && !$('#fsave').dataset.nudged){
+        $('#fsave').dataset.nudged='1';
+        warn.textContent='No cert/report link attached for this calibration \u2014 the Box link is the traceability record. Click \u201c' + (editing?'Save changes':'Log event') + '\u201d again to save without one.';
+        warn.hidden=false; QMS.fit(t); return;
+      }
+      warn.hidden=true;
+      $('#fsave').disabled = true;
+
+      var ct = $('#fct').value || undefined;
+      var cr = ($('#fty').value==='cal') ? $('#fcr').value : undefined;
+      var newLog, entry;
+      if(editing){
+        entry = editing;
+        entry.d = d; entry.ty = $('#fty').value; entry.n = $('#fn').value.trim();
+        if(att) entry.att = att; else delete entry.att;
+        if(cr) entry.cr = cr; else delete entry.cr;
+        entry.ed = Date.now();
+        newLog = log;
+      } else {
+        entry = { t:Date.now(), d:d, ty:$('#fty').value, by:me.id, byN:(me.fullName||me.username) };
+        var n = $('#fn').value.trim(); if(n) entry.n = n;
+        if(att) entry.att = att;
+        if(cr) entry.cr = cr;
+        newLog = QMS.appendLog(log, entry).list;
+      }
+
+      /* the most recent event date (log may be edited out of order) drives Last Serviced */
+      var latest = newLog.reduce(function(a,e){ return (e && !e.rl && e.d && (!a || e.d>a)) ? e.d : a; }, null);
+      var newMt = { ls: latest, iv: iv, ty: entry.ty }; if(ct) newMt.ct = ct;
+      var due = nextDue(newMt);
+
+      Promise.all([
+        t.set('card','shared','mtl', newLog),
+        t.set('card','shared','mt',  newMt)
+      ]).then(function(){
+        /* mirror Next Due onto Trello's native due date so assignees get
+           Trello's own reminders too; skipped gracefully if not authorized */
+        return due ? QMS.syncNativeDue(t, due) : null;
+      }).then(function(){ t.closePopup(); },
+              function(){ t.closePopup(); });
+    };
+    QMS.fit(t);
+  });
+};
+
+})();
+</script>
+<script>
+/* ============ MODULE: PROJECT INTAKE ============ */
+(function(){
+
+var PTYPES = { rc:'Recharge', gr:'Grant-Funded', cl:'Class-Instructional', il:'Internal Lab', ot:'Other' };
+var PRIOS  = { std:'Standard', rush:'Rush', hold:'Hold' };
+var STATS  = { 'new':'New', acc:'Accepted', dec:'Declined' };
+/* The TF service catalog — what a request can actually ask for. Multi-
+   select: real jobs routinely span services (print + finish, scan + print). */
+var SERVICES = { cnc:'CNC machining', fdm:'FDM printing', sla:'SLA printing', mjf:'SLS / MJF printing',
+                 pj:'PolyJet printing', lz:'Laser cutting', dcm:'DICOM / segmentation',
+                 eng:'Engineering / design', fin:'Finishing / post-processing' };
+var SITES = { gbsf:'Davis — GBSF', ags:'Sacramento — Aggie Square' };
+function svLabels(d){
+  return (d && Array.isArray(d.sv) && d.sv.length)
+    ? d.sv.map(function(k){ return SERVICES[k]||k; }).join(', ') : null;
+}
+
+function getIn(t, cardId){
+  var g = cardId ? t.get(cardId,'shared','in') : t.get('card','shared','in');
+  return g.then(function(v){ return (v&&typeof v==='object')?v:null; }).catch(function(){ return null; });
+}
+function stOf(d){ return (d && d.st) ? d.st : 'new'; }
+
+QMS.register({
+  id: 'intake',
+
+  /* ---- badge: grey New / green Accepted / red Declined ---- */
+  badges: function(t){
+    return getIn(t).then(function(d){
+      var st = stOf(d);
+      var out;
+      if(st==='acc') out = [{ text:'Intake: Accepted', color:'green' }];
+      else if(st==='dec') out = [{ text:'Intake: Declined', color:'red' }];
+      else out = [{ text:'Intake: New', color:'light-gray' }];
+      /* rush work should be loud on a queue board */
+      if(d && d.pr==='rush' && st!=='dec') out.push({ text:'RUSH', color:'orange' });
+      return out;
+    });
+  },
+
+  /* ---- board button: Intake Queue (every Job/Request still New) ---- */
+  boardButtons: [ { text:'Intake Queue', kind:'intake' } ],
+  overviews: [{
+    kind:'intake',
+    title:'Intake Queue \u2014 new requests pending review',
+    empty:'No pending intake \u2014 every job/request card has been accepted or declined.',
+    collect: function(t){
+      return t.cards('id','name','idList').then(function(cards){
+        return Promise.all(cards.map(function(c){
+          return Promise.all([ t.get(c.id,'shared','qt'), getIn(t, c.id) ]).then(function(r){
+            if(r[0]!=='job') return null;              /* jobs only */
+            var d=r[1];
+            if(stOf(d)!=='new') return null;
+            return { id:c.id, name:c.name, idList:c.idList,
+                     status:'New', color:'gray',
+                     detail: [ d && d.dt ? ('intake ' + QMS.fmtDate(d.dt)) : 'intake not entered',
+                               d && d.pr==='rush' ? 'RUSH' : null,
+                               svLabels(d) ].filter(Boolean).join(' \u00b7 '),
+                     sort: (d && d.pr==='rush' ? '0' : '1') + (d && d.dt ? d.dt : '9999') };
+          });
+        })).then(function(rows){
+          return rows.filter(Boolean).sort(function(a,b){ return a.sort<b.sort?-1:1; });
+        });
+      });
+    }
+  }],
+
+  /* ---- card-back section block ---- */
+  section: function(t, mount, ctx){
+    return getIn(t).then(function(d){
+      var st = stOf(d);
+      var chip = { 'new':['gray','New \u00b7 pending review'], acc:['green','Accepted'], dec:['red','Declined'] }[st];
+      var v = function(val, fmt){
+        return val ? '<span class="fv">' + QMS.esc(fmt?fmt(val):val) + '</span>' : '<span class="fv empty">\u2014</span>';
+      };
+      mount.innerHTML =
+        '<div class="ghead"><span class="gname">Project Intake</span>' +
+        '<span class="gsub"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></span></div>' +
+        '<div class="fieldgrid">' +
+        '<span class="fk">Requester</span>' + v(d&&d.rq) +
+        '<span class="fk">Project type</span>' + v(d&&PTYPES[d.pt]) +
+        '<span class="fk">Services requested</span>' + v(svLabels(d)) +
+        '<span class="fk">Site</span>' + v(d&&SITES[d.si]) +
+        '<span class="fk">Intake date</span>' + v(d&&d.dt, QMS.fmtDate) +
+        '<span class="fk">Priority</span>' + v(d&&PRIOS[d.pr]) +
+        '<span class="fk">Requested due date</span>' + v(d&&d.rd, QMS.fmtDate) +
+        '<span class="fk">Billing reference</span>' + v(d&&d.br) +
+        (st==='dec' ? '<span class="fk">Decline reason</span>' + v(d&&d.dr) : '') +
+        '</div>';
+      var acts = QMS.el('<div class="secacts"></div>');
+      var b = QMS.el('<button class="qbtn ' + (d?'alt':'save') + ' sm">' + (d?'Edit Intake Info':'Enter Intake Info') + '</button>');
+      if(!ctx.wl){
+        b.disabled = true;
+        acts.appendChild(b);
+        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
+      } else {
+        b.onclick = function(){
+          t.popup({ title:'Project Intake', url:QMS.url('intake'), height:430 });
+        };
+        acts.appendChild(b);
+      }
+      mount.appendChild(acts);
+    });
+  }
+});
+
+/* ---- popup view: guided intake form (all fields in one place) ---- */
+QMS.views.intake = function(t, app){
+  document.body.classList.add('mode-popup');
+  Promise.all([getIn(t), QMS.isWl(t)]).then(function(r){
+    var d=r[0]||{}, wl=r[1];
+    if(!wl){
+      app.innerHTML = '<div class="empty">Only QMS-authorized members can edit intake info.</div>';
+      QMS.fit(t); return;
+    }
+    var opts = function(map, sel){
+      return Object.keys(map).map(function(k){
+        return '<option value="'+k+'"'+(k===sel?' selected':'')+'>'+map[k]+'</option>';
+      }).join('');
+    };
+    app.innerHTML='';
+    var sv = Array.isArray(d.sv) ? d.sv : [];
+    var f = QMS.el('<div class="frm">' +
+      '<div class="frow"><label>Requester name</label><input class="min" id="frq" type="text" placeholder="e.g. Bofeng Pan"></div>' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Project type</label><select class="min" id="fpt">' + opts(PTYPES, d.pt||'rc') + '</select></div>' +
+        '<div class="frow"><label>Site</label><select class="min" id="fsi">' + opts(SITES, d.si||'gbsf') + '</select></div>' +
+      '</div>' +
+      '<div class="frow"><label>Services requested</label><div class="ckgrid" id="fsv">' +
+        Object.keys(SERVICES).map(function(k){
+          return '<label class="ck"><input type="checkbox" value="'+k+'"'+(sv.indexOf(k)>=0?' checked':'')+'> '+SERVICES[k]+'</label>';
+        }).join('') + '</div></div>' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Intake date</label><input class="min" id="fdt" type="date"></div>' +
+        '<div class="frow"><label>Requested due date</label><input class="min" id="frd" type="date"></div>' +
+      '</div>' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Priority</label><select class="min" id="fpr">' + opts(PRIOS, d.pr||'std') + '</select></div>' +
+        '<div class="frow"><label>Intake status</label><select class="min" id="fst">' + opts(STATS, d.st||'new') + '</select></div>' +
+      '</div>' +
+      '<div class="frow"><label>Billing reference</label><input class="min" id="fbr" type="text" placeholder="Aggie Enterprise chart string / PO / grant fund"></div>' +
+      '<div class="frow" id="fdrRow" hidden><label>Decline reason</label><input class="min" id="fdr" type="text" placeholder="Why this request was declined"></div>' +
+      '<div class="fwarn" id="fwarn" hidden></div>' +
+      '<div class="facts">' +
+        '<button class="qbtn cancel" id="fcancel">Cancel</button>' +
+        '<button class="qbtn save" id="fsave">Save intake</button></div>' +
+      '</div>');
+    app.appendChild(f);
+    var $ = function(s){ return f.querySelector(s); };
+    $('#frq').value = d.rq||'';
+    $('#fdt').value = d.dt||QMS.todayStr();
+    $('#frd').value = d.rd||'';
+    $('#fbr').value = d.br||'';
+    $('#fdr').value = d.dr||'';
+    var syncDec = function(){ $('#fdrRow').hidden = $('#fst').value!=='dec'; QMS.fit(t); };
+    $('#fst').onchange = syncDec; syncDec();
+
+    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fsave').onclick = function(){
+      var warn = $('#fwarn');
+      var svSel = Array.prototype.slice.call(f.querySelectorAll('#fsv input:checked')).map(function(i){ return i.value; });
+      var out = { rq:$('#frq').value.trim(), pt:$('#fpt').value, si:$('#fsi').value, dt:$('#fdt').value,
+                  pr:$('#fpr').value, rd:$('#frd').value||undefined, st:$('#fst').value };
+      if(svSel.length) out.sv = svSel;
+      var br=$('#fbr').value.trim(); if(br) out.br=br;
+      var dr=$('#fdr').value.trim(); if(dr) out.dr=dr;
+      if(!out.rq){ warn.textContent='Requester name is required.'; warn.hidden=false; QMS.fit(t); return; }
+      if(!out.dt){ warn.textContent='Intake date is required.'; warn.hidden=false; QMS.fit(t); return; }
+      if(out.st==='dec' && !out.dr){ warn.textContent='Give a short decline reason \u2014 it stays on the card as the record of why.'; warn.hidden=false; QMS.fit(t); return; }
+      /* soft nudge: accepted recharge work without a billing reference is
+         un-invoiceable \u2014 confirm once, then allow */
+      if(out.st==='acc' && out.pt==='rc' && !out.br && !$('#fsave').dataset.nudged){
+        $('#fsave').dataset.nudged='1';
+        warn.textContent='Accepting Recharge work with no billing reference \u2014 nothing to invoice against. Click \u201cSave intake\u201d again to accept anyway.';
+        warn.hidden=false; QMS.fit(t); return;
+      }
+      if(!out.rd) delete out.rd;
+      warn.hidden=true;
+      $('#fsave').disabled=true;
+      t.set('card','shared','in', out).then(function(){ t.closePopup(); }, function(){ t.closePopup(); });
+    };
+    QMS.fit(t);
+  });
+};
+
+})();
+</script>
+<script>
+/* ============ MODULE: INSPECTION & VERIFICATION ============ */
+(function(){
+
+var RESULTS = { pass:'Pass', fail:'Fail', hold:'Hold' };
+var ST_LABEL = { ns:'Not Started', pass:'Pass', fail:'Fail', hold:'Hold' };
+/* Hold/Fail reason codes — a fixed taxonomy so patterns are countable
+   across jobs (which process fails most, how often clients stall work)
+   instead of a pile of unique free-text strings. Details stay free-text. */
+var REASONS = {
+  dim:'Dimensional out of tolerance', fin:'Surface / finish defect',
+  prt:'Print / machine failure',      mat:'Material nonconformance',
+  pp: 'Damaged in post-processing',   cli:'Awaiting client input / approval',
+  chg:'Client change request',        eq: 'Equipment down',
+  doc:'Documentation incomplete',     oth:'Other'
+};
+
+function getIv(t, cardId){
+  var g = cardId ? t.get(cardId,'shared','iv') : t.get('card','shared','iv');
+  return g.then(function(v){ return (v&&typeof v==='object')?v:null; }).catch(function(){ return null; });
+}
+function getLog(t){
+  return t.get('card','shared','ivl').then(function(v){ return Array.isArray(v)?v:[]; }).catch(function(){ return []; });
+}
+function stOf(d){ return (d && d.st) ? d.st : 'ns'; }
+
+QMS.register({
+  id: 'inspection',
+
+  /* ---- badge: second card-front badge, shown alongside Intake's ---- */
+  badges: function(t){
+    return getIv(t).then(function(d){
+      var st = stOf(d);
+      if(st==='pass') return [{ text:'Inspection: Pass', color:'green' }];
+      if(st==='fail') return [{ text:'Inspection: Fail', color:'red' }];
+      if(st==='hold') return [{ text:'Inspection: Hold', color:'orange' }];
+      return [{ text:'Inspection: Not Started', color:'light-gray' }];
+    });
+  },
+
+  /* ---- board button: Hold & Fail Overview ---- */
+  boardButtons: [ { text:'Hold & Fail Overview', kind:'holdfail' } ],
+  overviews: [{
+    kind:'holdfail',
+    title:'Inspection \u2014 Hold & Fail',
+    empty:'No job/request cards are currently on Hold or Failed. All clear.',
+    collect: function(t){
+      return t.cards('id','name','idList').then(function(cards){
+        return Promise.all(cards.map(function(c){
+          return Promise.all([ t.get(c.id,'shared','qt'), getIv(t, c.id) ]).then(function(r){
+            if(r[0]!=='job') return null;
+            var d=r[1], st=stOf(d);
+            if(st!=='hold' && st!=='fail') return null;
+            return { id:c.id, name:c.name, idList:c.idList,
+                     status: ST_LABEL[st],
+                     color: st==='fail' ? 'red' : 'orange',
+                     detail: [d&&d.d?QMS.fmtDate(d.d):null, d&&REASONS[d.rc], d&&d.rs?d.rs:null].filter(Boolean).join(' \u00b7 '),
+                     sort: (st==='fail'?'0':'1') + (d&&d.d||'') };
+          });
+        })).then(function(rows){
+          return rows.filter(Boolean).sort(function(a,b){ return a.sort<b.sort?-1:1; });
+        });
+      });
+    }
+  }],
+
+  /* ---- card-back section block ---- */
+  section: function(t, mount, ctx){
+    return Promise.all([getIv(t), getLog(t)]).then(function(r){
+      var d=r[0], log=r[1], st=stOf(d);
+      var chip = { ns:['gray','Not Started'], pass:['green','Pass'],
+                   fail:['red','Fail'], hold:['orange','Hold'] }[st];
+      mount.innerHTML =
+        '<div class="ghead"><span class="gname">Inspection &amp; Verification</span>' +
+        '<span class="gsub"><span class="chip ' + chip[0] + '">' + chip[1] + '</span></span></div>' +
+        '<div class="fieldgrid">' +
+        '<span class="fk">Inspection status</span><span class="fv">' + ST_LABEL[st] + '</span>' +
+        '<span class="fk">Inspector</span><span class="fv' + (d&&d.byN?'':' empty') + '">' + QMS.esc(d&&d.byN||'\u2014') + '</span>' +
+        '<span class="fk">Inspection date</span><span class="fv' + (d&&d.d?'':' empty') + '">' + (d&&d.d?QMS.fmtDate(d.d):'\u2014') + '</span>' +
+        ((st==='hold'||st==='fail') ?
+          '<span class="fk">Hold/Fail reason</span><span class="fv' + ((d&&(d.rc||d.rs))?'':' empty') + '">' +
+            QMS.esc([d&&REASONS[d.rc], d&&d.rs].filter(Boolean).join(' \u2014 ')||'\u2014 not given') + '</span>' : '') +
+        '</div>';
+
+      var acts = QMS.el('<div class="secacts"></div>');
+      var b = QMS.el('<button class="qbtn save sm">Log Inspection Result</button>');
+      if(!ctx.wl){
+        b.disabled = true;
+        acts.appendChild(b);
+        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
+      } else {
+        b.onclick = function(){
+          t.popup({ title:'Log Inspection Result', url:QMS.url('inspectlog'), height:420 });
+        };
+        acts.appendChild(b);
+      }
+      mount.appendChild(acts);
+
+      mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Inspection history</span>' +
+        '<span class="why">' + log.length + ' entr' + (log.length===1?'y':'ies') + ' \u00b7 append-only</span></div>'));
+      if(log.some(function(e){ return e && (e.c || e.rl); })){
+        mount.appendChild(QMS.el('<div class="capwarn">Storage budget reached \u2014 the oldest entries were compacted (dates, results, and inspectors preserved where possible). Archive full history to Box.</div>'));
+      }
+      if(!log.length){
+        mount.appendChild(QMS.el('<div class="empty">No inspections logged yet.</div>'));
+      }
+      log.forEach(function(e){
+        if(e && e.rl){
+          mount.appendChild(QMS.el('<div class="le"><span class="lts"><span class="d">\u2026</span></span>' +
+            '<span class="lbody"><div class="lnote" style="font-style:italic">' + e.rl + ' older entr' + (e.rl===1?'y':'ies') +
+            ' rolled up (' + QMS.esc(QMS.fmtDate(e.f)) + ' \u2013 ' + QMS.esc(QMS.fmtDate(e.l)) + ') to stay within Trello\u2019s storage cap.</div></span></div>'));
+          return;
+        }
+        var rc = e.r==='pass'?'green': e.r==='fail'?'red':'orange';
+        var row = QMS.el('<div class="le' + (e.ed?' edited':'') + '">' +
+          '<span class="lts"><span class="d">' + QMS.esc(QMS.fmtDate(e.d)) + '</span>' +
+          (e.ed?'<span>edited</span>':'') + '</span>' +
+          '<span class="lbody"><span class="l1"><span class="chip ' + rc + '">' + QMS.esc(RESULTS[e.r]||e.r||'') + '</span>' +
+          '<span class="lby">' + QMS.esc(e.byN||'') + '</span></span>' +
+          ((e.rc||e.rs) ? '<div class="lnote">Reason: ' + QMS.esc([REASONS[e.rc], e.rs].filter(Boolean).join(' \u2014 ')) + '</div>' : '') +
+          (e.tl ? '<div class="lnote">Measured with: ' + QMS.esc(e.tl) + '</div>' : '') +
+          (e.n ? '<div class="lnote">' + QMS.esc(e.n) + '</div>' : '') +
+          (e.att ? '<a href="' + QMS.esc(e.att) + '" target="_blank" rel="noopener">attachment \u2197</a>' : '') +
+          (e.c ? '<div class="lnote" style="font-style:italic">note compacted for storage</div>' : '') +
+          '</span></div>');
+        if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
+          var eb = QMS.el('<button class="link ledit">edit</button>');
+          eb.onclick = function(){
+            t.popup({ title:'Edit Inspection Entry', url:QMS.url('inspectlog',{edit:e.t}), height:420 });
+          };
+          row.appendChild(eb);
+        }
+        mount.appendChild(row);
+      });
+    });
+  }
+});
+
+/* ---- popup view: Log Inspection Result / edit-within-window ---- */
+QMS.views.inspectlog = function(t, app){
+  document.body.classList.add('mode-popup');
+  var editTs = QMS.getParam('edit') ? +QMS.getParam('edit') : null;
+
+  Promise.all([getLog(t), QMS.me(t), QMS.isWl(t)]).then(function(r){
+    var log=r[0], me=r[1], wl=r[2];
+    var editing = editTs ? log.find(function(e){ return e.t===editTs; }) : null;
+    if(editTs && (!editing || !QMS.canEdit(editing, me.id))){
+      app.innerHTML = '<div class="empty">This entry can no longer be edited \u2014 the ' +
+        Math.round(QMS.EDIT_WINDOW_MS/3600000) + '-hour author window has closed. Log entries are never deleted; ' +
+        'log a new result to correct the record.</div>';
+      QMS.fit(t); return;
+    }
+    if(!wl){
+      app.innerHTML = '<div class="empty">Only QMS-authorized members can log inspection results.</div>';
+      QMS.fit(t); return;
+    }
+
+    app.innerHTML='';
+    var f = QMS.el('<div class="frm">' +
+      '<div class="fgrid2">' +
+        '<div class="frow"><label>Inspection date</label><input class="min" id="fd" type="date"></div>' +
+        '<div class="frow"><label>Result</label><select class="min" id="fr">' +
+          Object.keys(RESULTS).map(function(k){ return '<option value="'+k+'">'+RESULTS[k]+'</option>'; }).join('') +
+        '</select></div>' +
+      '</div>' +
+      '<div class="frow" id="frcRow" hidden><label>Hold/Fail reason</label><select class="min" id="frc">' +
+        '<option value="">\u2014 select \u2014</option>' +
+        Object.keys(REASONS).map(function(k){ return '<option value="'+k+'">'+REASONS[k]+'</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="frow" id="frsRow" hidden><label>Reason details</label>' +
+        '<input class="min" id="frs" type="text" placeholder="Which dimension / what happened / who are we waiting on"></div>' +
+      '<div class="frow"><label>Measurement tool used (optional)</label>' +
+        '<input class="min" id="ftl" type="text" placeholder="e.g. Calipers TF-CAL-01 \u2014 ties this check to a calibrated instrument"></div>' +
+      '<div class="frow"><label>Notes</label><textarea class="min" id="fn" placeholder="What was checked, measurements, acceptance criteria\u2026"></textarea></div>' +
+      '<div class="frow"><label>Attachment link (optional \u2014 never required)</label>' +
+        '<input class="min" id="fatt" type="url" placeholder="https:// \u2026 Box link to report, photos, CMM data"></div>' +
+      '<div class="fwarn" id="fwarn" hidden></div>' +
+      '<div class="facts"><span class="note" id="fnote"></span>' +
+        '<button class="qbtn cancel" id="fcancel">Cancel</button>' +
+        '<button class="qbtn save" id="fsave">' + (editing?'Save changes':'Log result') + '</button></div>' +
+      '</div>');
+    app.appendChild(f);
+
+    var $ = function(s){ return f.querySelector(s); };
+    var syncReason = function(){
+      var v=$('#fr').value, show=(v==='hold'||v==='fail');
+      $('#frcRow').hidden = !show;
+      $('#frsRow').hidden = !show;
+      QMS.fit(t);
+    };
+    $('#fd').value = editing ? editing.d : QMS.todayStr();
+    $('#fr').value = editing ? (editing.r||'pass') : 'pass';
+    $('#frc').value = editing ? (editing.rc||'') : '';
+    $('#frs').value = editing ? (editing.rs||'') : '';
+    $('#ftl').value = editing ? (editing.tl||'') : '';
+    $('#fn').value = editing ? (editing.n||'') : '';
+    $('#fatt').value = editing ? (editing.att||'') : '';
+    $('#fr').onchange = syncReason; syncReason();
+    $('#fnote').textContent = editing
+      ? ('Editing your entry \u2014 window closes ' + Math.round((editing.t+QMS.EDIT_WINDOW_MS-Date.now())/3600000) + 'h from now')
+      : ('Inspector: ' + (me.fullName||me.username));
+
+    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fsave').onclick = function(){
+      var warn = $('#fwarn');
+      var d = $('#fd').value, res = $('#fr').value, rs = $('#frs').value.trim();
+      var rc = $('#frc').value, tl = $('#ftl').value.trim();
+      if(!d){ warn.textContent='Inspection date is required.'; warn.hidden=false; QMS.fit(t); return; }
+      if((res==='hold'||res==='fail') && !rc){ warn.textContent='Pick a Hold/Fail reason code \u2014 fixed codes are what make failure patterns countable across jobs.'; warn.hidden=false; QMS.fit(t); return; }
+      var att = $('#fatt').value.trim();
+      if(att && !/^https?:\/\//i.test(att)){ warn.textContent='Attachment must be a full http(s) link.'; warn.hidden=false; QMS.fit(t); return; }
+      warn.hidden=true;
+      $('#fsave').disabled=true;
+
+      var newLog, entry;
+      var isHF = (res==='hold'||res==='fail');
+      if(editing){
+        entry = editing;
+        entry.d=d; entry.r=res; entry.n=$('#fn').value.trim()||undefined;
+        if(!entry.n) delete entry.n;
+        if(isHF && rc) entry.rc=rc; else delete entry.rc;
+        if(isHF && rs) entry.rs=rs; else delete entry.rs;
+        if(tl) entry.tl=tl; else delete entry.tl;
+        if(att) entry.att=att; else delete entry.att;
+        entry.ed=Date.now();
+        newLog = log;
+      } else {
+        entry = { t:Date.now(), d:d, r:res, by:me.id, byN:(me.fullName||me.username) };
+        var n=$('#fn').value.trim(); if(n) entry.n=n;
+        if(isHF && rc) entry.rc=rc;
+        if(isHF && rs) entry.rs=rs;
+        if(tl) entry.tl=tl;
+        if(att) entry.att=att;
+        newLog = QMS.appendLog(log, entry).list;
+      }
+
+      /* current status mirrors the most recent entry by inspection date
+         (falling back to creation order on ties) */
+      var latest = newLog.filter(function(e){ return e && !e.rl; }).sort(function(a,b){
+        return (b.d||'')===(a.d||'') ? (b.t-a.t) : ((b.d||'')<(a.d||'')?-1:1);
+      })[0];
+      var cur = { st:latest.r, by:latest.by, byN:latest.byN, d:latest.d };
+      if(latest.rc) cur.rc = latest.rc;
+      if(latest.rs) cur.rs = latest.rs;
+
+      Promise.all([
+        t.set('card','shared','ivl', newLog),
+        t.set('card','shared','iv',  cur)
+      ]).then(function(){ t.closePopup(); }, function(){ t.closePopup(); });
+    };
+    QMS.fit(t);
+  });
+};
+
+})();
+</script>
+<script>
+/* ----- boot router (same shape as the TF-Recharge dispatch) ----- */
+(function(){
+  var view = QMS.getParam('view');
+  var framed = (window.self !== window.top);
+  var hasTrello = (typeof window.TrelloPowerUp !== 'undefined');
+  var vb = document.getElementById('verBadge'); if(vb) vb.textContent = 'v' + QMS.VERSION;
+  if(hasTrello && framed && !view){ QMS.initConnector(); }
+  else if(hasTrello && framed && view){ QMS.initView(view); }
+  else {
+    document.getElementById('app').innerHTML =
+      '<div class="standalone"><h1>TF-QMS v' + QMS.VERSION + '</h1>' +
+      '<p>Trello Power-Up for UC Davis Tech Foundry — Equipment Maintenance &amp; Calibration, ' +
+      'Project Intake, and Inspection &amp; Verification.</p>' +
+      '<p>This page is the Power-Up connector and is meant to be loaded by Trello. ' +
+      'Register this URL as the iframe connector at <code>trello.com/power-ups/admin</code>, ' +
+      'then enable the Power-Up on the two boards. See <code>README.md</code> for setup and ' +
+      '<code>CHANGELOG.md</code> for history.</p></div>';
+  }
+})();
+</script>
+</body>
+</html>
