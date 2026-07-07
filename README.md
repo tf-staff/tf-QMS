@@ -30,7 +30,8 @@ index.html     the entire Power-Up: CSS theme, view containers, boot
                Inspection & Verification), each self-contained.
 CHANGELOG.md   mandatory change log (see standing instruction inside).
                The in-app "Power-Up Info" button fetches this file live.
-README.md      this file.
+USAGE.md       staff-facing usage guide (day-to-day workflows).
+README.md      this file (setup & administration).
 ```
 
 There is no `manifest.json`: the connector URL and capability list are

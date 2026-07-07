@@ -16,6 +16,16 @@ Newest entries at the top. Entries are never rewritten or deleted.
 
 ---
 
+## v1.3 — 2026-07-07
+**Author:** Claude (with Steven Lucero)
+**Summary:** Bug fix — card-back QMS section flashed white and jittered every few seconds (reported live, dark mode). Root cause: QMS.url() appended cb=Date.now() to every internal URL, including the one returned by the card-back-section capability. Trello re-evaluates capabilities every few seconds and on data changes; each evaluation produced a different URL, so Trello reloaded the section iframe each time (white paint during reload + sizeTo height re-negotiation). Fix: internal iframe URLs now carry only v=VERSION, which is byte-stable within a release and changes on deploy — the correct cache-bust. The one-shot CHANGELOG.md fetch in the Info popup keeps its timestamp (a fetch, not a capability iframe; always-fresh changelog is desired). Header comment updated so the lesson is recorded next to the URL convention. The section body's transparent background was inspected and left as-is — it is intentional, matching Trello's card-back color.
+**Files:** index.html, CHANGELOG.md
+
+## v1.2 (docs) — 2026-07-07
+**Author:** Claude (with Steven Lucero)
+**Summary:** Added USAGE.md — staff-facing usage guide (daily workflows per board, badge glossary, append-only/edit-window rules, storage roll-up explanation, editor checklist). Documentation only; index.html untouched, so QMS.VERSION stays 1.2 (no connector cache to bust).
+**Files:** USAGE.md, CHANGELOG.md
+
 ## v1.2 — 2026-07-07
 **Author:** Claude (with Steven Lucero)
 **Summary:** Domain-knowledge iteration — the generic scaffold now reflects Tech Foundry operations and standard QMS practice for a fab/prototyping facility. Equipment: equipment-category presets matching the actual TF fleet (CNC, FDM, SLA, SLS/MJF, PolyJet, laser cutter, metrology, post-processing) with suggested intervals and PM checklist hints in the log form; calibration events capture an as-left result (in tolerance / adjusted / out of tolerance) and nudge (soft, non-blocking) for a cert link when logging a calibration without one. Intake: services-requested multi-select from the TF service catalog, Site (GBSF / Aggie Square), billing reference (chart string / PO / grant fund) with a soft nudge when accepting Recharge work without one, required decline reason, and a second orange RUSH card badge; Intake Queue sorts rush first. Inspection: fixed Hold/Fail reason-code taxonomy (required, so failure patterns are countable) with free-text details, and an optional measurement-tool field tying dimensional checks to a calibrated instrument. Core: log compaction stage 1 also strips the tool field. New .ckgrid CSS for the services checkboxes. All new fields are optional-by-default and backward compatible with cards created under v1.0/1.1.
