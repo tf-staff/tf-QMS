@@ -16,6 +16,11 @@ Newest entries at the top. Entries are never rewritten or deleted.
 
 ---
 
+## v1.4 — 2026-07-07
+**Author:** Claude (with Steven Lucero)
+**Summary:** Follow-up to v1.3 — flashing persisted on the live board because a second URL-variance source remained: the card-back-section capability called t.signUrl() on every evaluation, and signUrl embeds a fresh signed token each call, so the URL still differed between Trello's polls and the iframe still reloaded. The section URL is now signed once and cached per card + kind + version (QMS._secUrl); a deploy or card switch re-signs naturally, and one-shot popups/modals continue signing per click. Also fixed the classify-view scrollbar: the capability's initial height (110) was below actual content, so each poll re-applied a too-short height that fought t.sizeTo — initial heights raised to match real content (classify 155, job section 360) and the section document now clips overflow, since sizeTo owns the height. Enabled native due-date sync by embedding the public app key in QMS.APP_KEY (public identifier, not a secret; per-member token authorization unchanged). Reminder recorded: the API key's Allowed Origins must include https://tf-staff.github.io or the authorize popup will not open.
+**Files:** index.html, CHANGELOG.md
+
 ## v1.3 — 2026-07-07
 **Author:** Claude (with Steven Lucero)
 **Summary:** Bug fix — card-back QMS section flashed white and jittered every few seconds (reported live, dark mode). Root cause: QMS.url() appended cb=Date.now() to every internal URL, including the one returned by the card-back-section capability. Trello re-evaluates capabilities every few seconds and on data changes; each evaluation produced a different URL, so Trello reloaded the section iframe each time (white paint during reload + sizeTo height re-negotiation). Fix: internal iframe URLs now carry only v=VERSION, which is byte-stable within a release and changes on deploy — the correct cache-bust. The one-shot CHANGELOG.md fetch in the Info popup keeps its timestamp (a fetch, not a capability iframe; always-fresh changelog is desired). Header comment updated so the lesson is recorded next to the URL convention. The section body's transparent background was inspected and left as-is — it is intentional, matching Trello's card-back color.

@@ -199,10 +199,10 @@
 var QMS = window.QMS = {};
 
 /* ----- identity / configuration ----- */
-QMS.VERSION = '1.3';
+QMS.VERSION = '1.4';
 /* Fallback shown by Power-Up Info if CHANGELOG.md can't be fetched.
    Keep in sync with the most recent CHANGELOG.md summary line. */
-QMS.LAST_CHANGE = 'Fixed card-back section flash/jitter: removed the per-call cb= timestamp from internal iframe URLs so Trello stops reloading the section iframe on every capability poll. v=VERSION remains the sole (per-release) cache-buster.';
+QMS.LAST_CHANGE = 'Fixed remaining section flash (t.signUrl re-signed per poll; now signed once and cached per card), fixed classify-view scrollbar/height oscillation, enabled native due-date sync (public app key embedded).';
 
 /* Native due-date sync (Module 1) requires the Trello REST API.
    Paste the Power-Up's API key from https://trello.com/power-ups/admin
@@ -250,6 +250,7 @@ QMS.el = function(html){ var d=document.createElement('div'); d.innerHTML=html.t
 
 /* Version-stamped internal URL — the anti-stale-cache lesson from the
    TF Power-Up family: every iframe URL carries v + cb. */
+QMS._secUrl = {};   /* signed section-URL cache — see card-back-section */
 QMS.url = function(view, params){
   /* v=VERSION is the ONLY cache-buster. Never add a per-call timestamp:
      the card-back-section capability is re-evaluated by Trello every few
@@ -427,8 +428,20 @@ QMS.initConnector = function(){
       return QMS.boardKind(t).then(function(kind){
         if(!kind) return;
         var make = function(height){
-          var u = QMS.url('section', { kind:kind });
-          try{ if(t.signUrl) u = t.signUrl(u); }catch(e){}
+          /* Sign ONCE and cache. t.signUrl() embeds a fresh signed token on
+             every call, so signing inside each capability evaluation is the
+             same bug as cb=Date.now() was (v1.3): the URL differs between
+             polls and Trello reloads the section iframe every few seconds.
+             Cache key includes card + version so a deploy or card switch
+             re-signs naturally. One-shot popups/modals may sign per click. */
+          var key = kind + '|' + QMS.VERSION;
+          try{ var c = t.getContext(); if(c && c.card) key = c.card + '|' + key; }catch(e){}
+          var u = QMS._secUrl[key];
+          if(!u){
+            u = QMS.url('section', { kind:kind });
+            try{ if(t.signUrl) u = t.signUrl(u); }catch(e){}
+            QMS._secUrl[key] = u;
+          }
           return {
             title: 'TF-QMS v' + QMS.VERSION,
             icon: QMS.ICON,
@@ -438,7 +451,7 @@ QMS.initConnector = function(){
         if(kind==='ops'){
           return t.get('card','shared','qt').then(function(qt){
             if(qt==='int') return;              /* Internal: no QMS UI at all */
-            return make(qt ? 340 : 110);        /* job section vs classify prompt */
+            return make(qt ? 360 : 155);        /* job section vs classify prompt */
           });
         }
         return make(330);
@@ -523,6 +536,8 @@ QMS.fit = function(t, sel){
 ============================================================ */
 QMS.viewSection = function(t, app){
   document.body.classList.add('mode-section');
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
   var kind = QMS.getParam('kind');
   var render = function(){
     Promise.all([ QMS.isWl(t), QMS.me(t),
