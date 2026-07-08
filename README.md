@@ -55,7 +55,8 @@ admin UI accordingly — and log it in CHANGELOG.md.)
 At <https://trello.com/power-ups/admin>: **New** → name `TF-QMS`, pick the
 Tech Foundry workspace, set the **Iframe connector URL** to the URL above.
 Under **Capabilities**, enable exactly: `card-badges`, `card-back-section`,
-`board-buttons`, `card-buttons`.
+`board-buttons`. (v2.0 dropped `card-buttons` — uncheck it if it was
+   previously enabled.)
 
 ### 3. Enable on the two boards
 On each of **UC Davis Tech Foundry Daily Operations** and **Equipment and

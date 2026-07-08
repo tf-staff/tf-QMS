@@ -1,11 +1,18 @@
 # TF-QMS — Usage Guide
 
 *For Tech Foundry staff using the Power-Up day to day. Setup and administration
-live in README.md; change history in CHANGELOG.md. Current as of v1.2.*
+live in README.md; change history in CHANGELOG.md. Current as of v2.0.*
+
+**The one interaction to learn:** every card's QMS panel is a read-only
+summary. To edit anything — intake, inspections, maintenance, card type —
+click **Open** in the panel's header. That opens the editor, the single
+place all changes happen. The board menu likewise has a single **TF-QMS**
+button containing the overviews, access management, and version info.
 
 TF-QMS adds three quality-system functions to the two boards you already work
 in. Nothing about how you move cards changes — the Power-Up rides along on the
-cards, adding badges, a QMS section on the card back, and a few board buttons.
+cards, adding a badge when something needs attention, a QMS panel on the
+card back (edited via its **Open** action), and one **TF-QMS** board button.
 
 **One rule above all: Trello is the index, Box is the record.** Certs,
 inspection reports, photos, and archived histories live in Box; cards carry
@@ -24,7 +31,7 @@ the status and the links.
 
 Reading is open to everyone on the board. Writing (logging events, editing
 intake, classifying cards) is limited to QMS-authorized members — the list is
-self-managed via the **Manage QMS Access** board button. If your buttons are
+self-managed via **TF-QMS → Access** on the board menu. If editor controls are
 greyed out with "QMS-authorized members only," ask any current QMS member to
 add you there. This is a workflow guardrail, not security — treat it as a
 "who's trained" list.
@@ -42,12 +49,17 @@ New cards show a grey **Classify this card** badge. Open the card and pick:
 - **Internal** — team tasks, admin, reminders. QMS leaves these alone
   entirely (no badges, no section).
 
-Misclassified something as Internal? QMS-authorized members see a small
-**QMS: Card Type** button on the card to flip it back.
+Misclassified something as Internal? Internal cards keep a one-line QMS
+panel — its **Open** action reaches the Card Type control.
+
+Job cards carry **at most one badge**, and only when action is needed:
+**Inspection FAIL** (red) → **On HOLD** (orange) → **RUSH** (yellow) →
+**New intake** (grey). Accepted work that's passing shows nothing — a
+quiet card is a healthy card.
 
 ### Project Intake (when a request arrives)
 
-Open the card → QMS section → **Enter Intake Info**. The form asks for:
+Open the card → **Open** on the QMS panel → **Project Intake** form:
 
 - **Requester** and **Intake date** (required)
 - **Project type** — Recharge / Grant / Class / Internal Lab / Other
@@ -65,12 +77,12 @@ as the record of why), and **accepting Recharge work with no billing
 reference asks you to confirm** — un-invoiceable work shouldn't slip into the
 queue silently. Click Save a second time if you genuinely mean to.
 
-The **Intake Queue** board button lists every Job/Request card still sitting
+**TF-QMS → Intake Queue** on the board menu lists every Job/Request card sitting
 at New, rush first, oldest first.
 
 ### Inspection & Verification (when work gets checked)
 
-QMS section → **Log Inspection Result**:
+**Open** on the QMS panel → **Inspection & Verification** form:
 
 - **Result** — Pass / Fail / Hold
 - **Hold/Fail reason** — required for Hold and Fail, picked from a fixed list
@@ -84,7 +96,7 @@ QMS section → **Log Inspection Result**:
 
 Your name and the date are recorded automatically. The card badge follows the
 most recent result: green Pass, red Fail, orange Hold. The **Hold & Fail
-Overview** board button gathers everything currently stuck, failures first.
+Overview** tab (board menu → TF-QMS) gathers everything stuck, failures first.
 
 Inspection history is **append-only**: you can edit *your own* entry for
 24 hours (typo window), after which it's permanent. Never "fix" the past —
@@ -94,16 +106,17 @@ log a new result; the current status always follows the newest entry.
 
 ## Equipment and Maintenance board
 
-Each machine is a card. The badge tells you everything at a glance:
+Each machine is a card. Badges only appear when something needs you —
+**a quiet card is a healthy card**:
 
-- **Green** — up to date, shows the next due date
-- **Yellow** — due within 14 days
 - **Red** — overdue
+- **Yellow** — due within 14 days
 - **Grey** — nothing logged yet
+- *(no badge)* — up to date; next-due lives on the card panel
 
 ### Logging a maintenance or calibration event
 
-QMS section → **Log Maintenance Event**:
+**Open** on the QMS panel → **Maintenance & Calibration** form:
 
 - **Equipment category** — pick the machine class (CNC, FDM, SLA, SLS/MJF,
   PolyJet, laser cutter, metrology, post-processing). This suggests a typical
@@ -122,7 +135,7 @@ QMS section → **Log Maintenance Event**:
 Laser cutters: the checklist hint includes extraction/filtration flow — that
 one is also a fire-safety control, so log it every time.
 
-The **Maintenance Overview** board button lists everything yellow or red,
+**TF-QMS → Maintenance Overview** lists everything yellow or red,
 most-overdue first. Same append-only and 24-hour edit rules as inspections.
 
 If you see an "Enable" prompt about due-date sync in the section, clicking it
@@ -142,15 +155,11 @@ you get Trello's own reminders. Optional; everything works without it.
   closed. Add a new entry instead.
 - **Buttons greyed out:** you're not on the QMS access list for that board —
   see "Who can write" above.
-- **"QMS: Card Type" button missing on an Internal card:** three things to
-  check, in order. (1) Authorization is **per-board** — being on the list on
-  the Equipment board doesn't carry to Daily Operations; open **Manage QMS
-  Access** on the board you're standing on — it now tells you directly
-  whether *you* are authorized there. (2) Trello puts Power-Up card buttons
-  in the card's actions area, sometimes tucked under a "Power-Ups" group
-  depending on Trello's card layout — scroll the card's right-hand/lower
-  actions. (3) The **card-buttons** capability must be enabled in the
-  Power-Up admin (README setup step 2).
+- **Can't change an Internal card's type:** use **Open** on its one-line
+  QMS panel — the Card Type control is in the editor. If the buttons are
+  disabled, authorization is **per-board**: check **TF-QMS → Access** on the
+  board you're standing on; it tells you directly whether *you* are
+  authorized there.
 - **A change I just deployed isn't showing:** Trello caches connectors
   aggressively. Editors: bump `QMS.VERSION`; users: hard-refresh, or
   disable/re-enable the Power-Up on the board if it persists.
@@ -159,7 +168,7 @@ you get Trello's own reminders. Optional; everything works without it.
 
 One file: `index.html`. Before any change is complete, add a CHANGELOG.md
 entry (date, author, summary, files) and bump `QMS.VERSION` in the CORE
-FRAMEWORK script block — the **Power-Up Info** board button shows users the
+FRAMEWORK script block — **TF-QMS → Info** shows users the
 version and the newest changelog summary, and the version bump is also what
 busts Trello's cache. New modules are new script blocks; existing blocks
 don't get touched for that. Full guide in README.md.

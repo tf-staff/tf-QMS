@@ -24,9 +24,8 @@
     (no view)          connector — hidden iframe; registers capabilities
     ?view=section      combined card-back section (all active modules)
     ?view=classify     Card Type popup (Board 1)
-    ?view=intake       Edit Intake Info popup form
-    ?view=maintlog     Log Maintenance Event popup form
-    ?view=inspectlog   Log Inspection Result popup form
+    ?view=editor       the ONE editing surface (modal via the section's Open action)
+    ?view=hub          the ONE board-button surface (overviews · access · info)
     ?view=overview     board-level overview modal (&kind=maint|intake|holdfail)
     ?view=access       Manage QMS Access modal
     ?view=info         Power-Up Info popup (version + latest change)
@@ -199,10 +198,10 @@
 var QMS = window.QMS = {};
 
 /* ----- identity / configuration ----- */
-QMS.VERSION = '1.6';
+QMS.VERSION = '2.0';
 /* Fallback shown by Power-Up Info if CHANGELOG.md can't be fetched.
    Keep in sync with the most recent CHANGELOG.md summary line. */
-QMS.LAST_CHANGE = 'Fixed dead form buttons: popups opened from the card-back section (intake, maintenance, inspection, classify-change) now sign their URLs, which Trello requires from non-connector iframes.';
+QMS.LAST_CHANGE = 'Adopted the proven TF-Recharge pattern: read-only section + one Open editor modal (all forms work reliably now), ONE board button (hub modal), exception-based single badges (quiet when healthy), card-buttons capability removed.';
 
 /* Native due-date sync (Module 1) requires the Trello REST API.
    Paste the Power-Up's API key from https://trello.com/power-ups/admin
@@ -406,14 +405,20 @@ QMS.initConnector = function(){
     'card-badges': function(t){
       return QMS.boardKind(t).then(function(kind){
         if(!kind) return [];
+        /* Exception-based badging (v2.0): at most ONE badge per card, quiet
+           when healthy — the board only speaks when something needs a human.
+           Priority resolves across modules, so it lives here in core. */
         if(kind==='ops'){
-          /* Card Type gate (core): unset → classify prompt; internal → nothing */
-          return t.get('card','shared','qt').then(function(qt){
-            if(!qt) return [{ text:'Classify this card', color:'light-gray' }];
-            if(qt==='int') return [];
-            return Promise.all(QMS.activeModules('ops').map(function(m){
-              return m.badges ? m.badges(t) : [];
-            })).then(function(arrs){ return [].concat.apply([], arrs); });
+          return t.get('card','shared').then(function(blob){
+            blob = blob||{};
+            if(!blob.qt) return [{ text:'Classify', color:'light-gray' }];
+            if(blob.qt==='int') return [];
+            var iv=blob.iv||{}, inn=blob['in']||{};
+            if(iv.st==='fail') return [{ text:'Inspection FAIL', color:'red' }];
+            if(iv.st==='hold') return [{ text:'On HOLD', color:'orange' }];
+            if(inn.pr==='rush' && inn.st!=='dec') return [{ text:'RUSH', color:'yellow' }];
+            if(!inn.st || inn.st==='new') return [{ text:'New intake', color:'light-gray' }];
+            return [];   /* accepted + passing (or declined) = quiet */
           });
         }
         return Promise.all(QMS.activeModules(kind).map(function(m){
@@ -448,13 +453,31 @@ QMS.initConnector = function(){
             content: { type:'iframe', url:u, height:height }
           };
         };
+        /* THE proven family pattern (TF-Recharge): the section itself is a
+           read-only summary; ALL editing happens in one modal opened via the
+           capability's `action` — Trello renders that "Open" link in the
+           section header, so its callback runs in CONNECTOR context, where
+           modals work unconditionally. Never launch UI from inside the
+           section iframe: t.popup from an embedded iframe is unreliable
+           (v1.6's silently dead buttons). */
+        var withOpen = function(sec){
+          if(!sec) return sec;
+          sec.action = { text:'Open', callback: function(tt){
+            var u = QMS.url('editor', { kind:kind });
+            try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
+            return tt.modal({ url:u, fullscreen:false, height:760,
+                              title:'TF-QMS', accentColor:'#242528' });
+          }};
+          return sec;
+        };
         if(kind==='ops'){
           return t.get('card','shared','qt').then(function(qt){
-            if(qt==='int') return;              /* Internal: no QMS UI at all */
-            return make(qt ? 360 : 155);        /* job section vs classify prompt */
+            if(!qt) return make(155);                 /* classify prompt (in-section; t.set works from iframes) */
+            if(qt==='int') return withOpen(make(44)); /* minimal one-liner + Open (reclassify lives in the editor) */
+            return withOpen(make(320));               /* job: read-only summary + Open */
           });
         }
-        return make(330);
+        return withOpen(make(300));
       });
     },
 
@@ -467,42 +490,17 @@ QMS.initConnector = function(){
           try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
           return tt.modal({ url:u, fullscreen:false, height:h||620, title:title, accentColor:'#242528' });
         };
-        var btns = [];
-        QMS.activeModules(kind).forEach(function(m){
-          (m.boardButtons||[]).forEach(function(b){
-            btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:b.text, callback:function(tt){
-              return modal(tt, 'overview', {kind:b.kind}, b.text, 620);
-            }});
-          });
-        });
-        btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:'Manage QMS Access', callback:function(tt){
-          return modal(tt, 'access', null, 'Manage QMS Access', 520);
-        }});
-        btns.push({ icon:{dark:QMS.ICON, light:QMS.ICON}, text:'Power-Up Info', callback:function(tt){
-          var u = QMS.url('info');
-          try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
-          return tt.popup({ title:'TF-QMS', url:u, height:150 });
-        }});
-        return btns;
+        /* ONE button per board (v2.0): overviews, access, and info live as
+           tabs inside a single hub modal — the board menu stays quiet. */
+        return [{ icon:{dark:QMS.ICON, light:QMS.ICON}, text:'TF-QMS', callback:function(tt){
+          return modal(tt, 'hub', {kind:kind}, 'TF-QMS', 620);
+        }}];
       });
     },
 
-    /* --- card button: reclassify path for Internal cards (whitelist only).
-           Internal cards intentionally show no badge/section; this small
-           whitelisted-only button is how a misclassified card gets fixed. --- */
-    'card-buttons': function(t){
-      return QMS.boardKind(t).then(function(kind){
-        if(kind!=='ops') return [];
-        return Promise.all([t.get('card','shared','qt'), QMS.isWl(t)]).then(function(r){
-          if(r[0]!=='int' || !r[1]) return [];
-          return [{ icon:QMS.ICON, text:'QMS: Card Type', callback:function(tt){
-            var u = QMS.url('classify');
-            try{ if(tt.signUrl) u = tt.signUrl(u); }catch(e){}
-            return tt.popup({ title:'Card Type', url:u, height:170 });
-          }}];
-        });
-      });
-    }
+    /* card-buttons capability removed in v2.0 — Internal cards now show a
+       minimal one-line section whose Open action reaches the editor, so the
+       reclassify path is self-discoverable instead of hidden. */
 
   }, initOpts);
 };
@@ -519,22 +517,90 @@ QMS.initView = function(view){
   if(!t) return;
   QMS.applyTheme(t);
   var app = document.getElementById('app');
-  var core = { section:QMS.viewSection, classify:QMS.viewClassify, access:QMS.viewAccess,
-               overview:QMS.viewOverview, info:QMS.viewInfo };
+  var core = { section:QMS.viewSection, access:QMS.viewAccess,
+               overview:QMS.viewOverview, info:QMS.viewInfo,
+               editor:QMS.viewEditor, hub:QMS.viewHub };
   var fn = core[view] || QMS.views[view];
   if(fn) fn(t, app);
 };
 
-/* ---- shared: open a popup from a section/other iframe ----
-   t.popup called from a non-connector iframe REQUIRES a signed URL;
-   unsigned URLs are rejected via a promise rejection, which looks like
-   “click does nothing” if uncaught. Sign per click (one-shot). */
-QMS.pop = function(t, title, view, params, height){
-  var u = QMS.url(view, params);
-  try{ if(t.signUrl) u = t.signUrl(u); }catch(e){}
-  var p = t.popup({ title:title, url:u, height:height });
-  if(p && p.catch) p.catch(function(err){ try{ console.error('TF-QMS popup failed:', title, err); }catch(e){} });
-  return p;
+/* ============================================================
+   VIEW: editor modal — the ONE place everything gets edited.
+   Opened from the section header's Open action (connector context).
+============================================================ */
+QMS.viewEditor = function(t, app){
+  document.body.classList.add('mode-modal');
+  var kind = QMS.getParam('kind');
+  var render = function(){
+    Promise.all([QMS.isWl(t), QMS.me(t), t.get('card','shared')]).then(function(r){
+      var blob = r[2]||{};
+      var ctx = { wl:r[0], me:r[1], qt:blob.qt, refresh:render };
+      app.innerHTML = '';
+      if(kind==='ops'){
+        /* Card Type block — also the reclassify path for Internal cards */
+        var tb = QMS.el('<div class="qsec"><div class="ghead"><span class="gname">Card Type</span></div>' +
+          '<div class="secacts"></div>' +
+          (ctx.wl ? '' : '<div class="secacts"><span class="why">Only QMS-authorized members can set the card type.</span></div>') +
+          '</div>');
+        var row = tb.querySelector('.secacts');
+        [['Job / Request','job'],['Internal','int']].forEach(function(p){
+          var b = QMS.el('<button class="qbtn sm ' + (ctx.qt===p[1]?'save':'cancel') + '">' + p[0] +
+                         (ctx.qt===p[1]?' \u2713':'') + '</button>');
+          b.disabled = !ctx.wl;
+          b.onclick = function(){ t.set('card','shared','qt', p[1]).then(render); };
+          row.appendChild(b);
+        });
+        app.appendChild(tb);
+        if(ctx.qt!=='job'){
+          if(ctx.qt==='int') app.appendChild(QMS.el('<div class="empty">Internal card \u2014 no QMS tracking applies.</div>'));
+          return;
+        }
+      }
+      QMS.activeModules(kind).forEach(function(m){
+        if(!m.editor) return;
+        var mount = document.createElement('div'); mount.className='qsec';
+        app.appendChild(mount);
+        m.editor(t, mount, ctx);
+      });
+    });
+  };
+  render();
+};
+
+/* ============================================================
+   VIEW: hub modal — one board button, everything inside.
+============================================================ */
+QMS.viewHub = function(t, app){
+  document.body.classList.add('mode-modal');
+  var kind = QMS.getParam('kind');
+  var tabs = [];
+  QMS.activeModules(kind).forEach(function(m){
+    (m.overviews||[]).forEach(function(o){ tabs.push({ label:(o.tab||o.title), fn:function(tt,mount){ QMS.viewOverview(tt, mount, o.kind); } }); });
+  });
+  tabs.push({ label:'Access', fn:function(tt,mount){ QMS.viewAccess(tt, mount); } });
+  tabs.push({ label:'Info',   fn:function(tt,mount){ QMS.viewInfo(tt, mount); } });
+  app.innerHTML = '';
+  var nav = QMS.el('<div class="secacts" style="gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>');
+  var content = QMS.el('<div></div>');
+  app.appendChild(nav); app.appendChild(content);
+  var current = -1;
+  var show = function(i){
+    if(i===current) return;
+    current = i;
+    Array.prototype.forEach.call(nav.children, function(b, j){
+      b.className = 'qbtn sm ' + (j===i ? 'save' : 'cancel');
+    });
+    content.innerHTML = '';
+    var mount = document.createElement('div');
+    content.appendChild(mount);
+    tabs[i].fn(t, mount);
+  };
+  tabs.forEach(function(tab, i){
+    var b = QMS.el('<button class="qbtn sm cancel">' + tab.label + '</button>');
+    b.onclick = function(){ show(i); };
+    nav.appendChild(b);
+  });
+  if(tabs.length) show(0);
 };
 
 /* ---- shared: popup sizing ---- */
@@ -597,23 +663,18 @@ QMS.viewSection = function(t, app){
         return;
       }
       if(kind==='ops' && ctx.qt==='int'){
-        /* connector hides the section for internal cards; if we're here the
-           type just changed — show a settling note */
-        app.appendChild(QMS.el('<div class="empty">Internal card — no QMS tracking. (This section disappears on reload.)</div>'));
+        /* minimal by design: internal cards carry no QMS tracking; the
+           section exists only so the header's Open action (→ editor) keeps
+           the reclassify path discoverable */
+        app.appendChild(QMS.el('<div class="empty" style="padding:4px 0">Internal card \u2014 no QMS tracking. Misclassified? Open \u2192 Card Type.</div>'));
         QMS.fit(t); return;
       }
       var mods = QMS.activeModules(kind);
       var chain = Promise.resolve();
       if(kind==='ops'){
-        var head = QMS.el('<div class="secacts"><span class="why">Card type: <b>Job / Request</b></span></div>');
-        if(ctx.wl){
-          var chg = QMS.el('<button class="link">change</button>');
-          chg.onclick = function(){
-            QMS.pop(t, 'Card Type', 'classify', null, 170);
-          };
-          head.appendChild(chg);
-        }
-        app.appendChild(head);
+        /* read-only summary — type changes (and all editing) live in the
+           editor modal via the section header's Open action */
+        app.appendChild(QMS.el('<div class="secacts"><span class="why">Card type: <b>Job / Request</b> \u00b7 edit via <b>Open</b> \u2191</span></div>'));
       }
       mods.forEach(function(m){
         chain = chain.then(function(){
@@ -627,34 +688,6 @@ QMS.viewSection = function(t, app){
   };
   try{ t.render(function(){ QMS.applyTheme(t); render(); }); }catch(e){ render(); }
   render();
-};
-
-/* ============================================================
-   VIEW: classify popup (reclassification path)
-============================================================ */
-QMS.viewClassify = function(t, app){
-  document.body.classList.add('mode-popup');
-  Promise.all([QMS.isWl(t), t.get('card','shared','qt')]).then(function(r){
-    var wl=r[0], qt=r[1];
-    app.innerHTML='';
-    var c = QMS.el('<div class="classify">' +
-      '<div class="cx">Current type: <b>' + (qt==='job'?'Job / Request': qt==='int'?'Internal':'not set') + '</b>. ' +
-      'Reclassifying does not erase QMS data already on the card; it only changes which QMS sections apply.</div>' +
-      '<div class="cbtns"></div>' +
-      (wl ? '' : '<div class="fwarn">Only QMS-authorized members can change the card type.</div>') +
-      '</div>');
-    var btns=c.querySelector('.cbtns');
-    var mk=function(label,val,cls){
-      var b=QMS.el('<button class="qbtn '+cls+'">'+label+'</button>');
-      if(!wl || qt===val) b.disabled=true;
-      b.onclick=function(){ t.set('card','shared','qt',val).then(function(){ t.closePopup(); }); };
-      return b;
-    };
-    btns.appendChild(mk('Job / Request','job','save'));
-    btns.appendChild(mk('Internal','int','cancel'));
-    app.appendChild(c);
-    QMS.fit(t);
-  });
 };
 
 /* ============================================================
@@ -742,9 +775,9 @@ QMS.viewAccess = function(t, app){
    VIEW: overview modal shell — kind resolved to a module handler
    (modules declare: overviews:[{kind, title, collect(t) -> rows}])
 ============================================================ */
-QMS.viewOverview = function(t, app){
+QMS.viewOverview = function(t, app, kindOverride){
   document.body.classList.add('mode-modal');
-  var kind = QMS.getParam('kind');
+  var kind = kindOverride || QMS.getParam('kind');
   var def = null;
   Object.keys(QMS.modules).forEach(function(id){
     (QMS.modules[id].overviews||[]).forEach(function(o){ if(o.kind===kind) def=o; });
@@ -857,10 +890,11 @@ QMS.register({
   badges: function(t){
     return getMt(t).then(function(mt){
       var st = status(mt);
-      if(st.s==='none')   return [{ text:'Maint: not logged', color:'light-gray', refresh:3600 }];
-      if(st.s==='red')    return [{ text:'Maint OVERDUE \u00b7 ' + QMS.fmtDate(st.due), color:'red', refresh:3600 }];
-      if(st.s==='yellow') return [{ text:'Maint due ' + QMS.fmtDate(st.due), color:'yellow', refresh:3600 }];
-      return [{ text:'Maint OK \u00b7 next ' + QMS.fmtDate(st.due), color:'green', refresh:3600 }];
+      /* exception-based (v2.0): healthy machines stay quiet on the board */
+      if(st.s==='none')   return [{ text:'No maint log', color:'light-gray', refresh:3600 }];
+      if(st.s==='red')    return [{ text:'OVERDUE \u00b7 ' + QMS.fmtDate(st.due), color:'red', refresh:3600 }];
+      if(st.s==='yellow') return [{ text:'Due ' + QMS.fmtDate(st.due), color:'yellow', refresh:3600 }];
+      return [];
     });
   },
 
@@ -906,38 +940,8 @@ QMS.register({
         '<span class="fk">Last maintenance type</span><span class="fv' + (mt.ty?'':' empty') + '">' + (TYPES[mt.ty]||'\u2014') + '</span>' +
         '</div>';
 
-      /* actions row */
-      var acts = QMS.el('<div class="secacts"></div>');
-      var logBtn = QMS.el('<button class="qbtn save sm">Log Maintenance Event</button>');
-      if(!ctx.wl){
-        logBtn.disabled = true;
-        acts.appendChild(logBtn);
-        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
-      } else {
-        logBtn.onclick = function(){
-          QMS.pop(t, 'Log Maintenance Event', 'maintlog', null, 430);
-        };
-        acts.appendChild(logBtn);
-      }
-      mount.appendChild(acts);
-
-      /* due-date sync state (native card due mirrors Next Due) */
-      if(QMS.dueSyncAvailable()){
-        var api; try{ api = t.getRestApi(); }catch(e){ api=null; }
-        if(api){
-          api.isAuthorized().then(function(ok){
-            if(ok) return;
-            var row = QMS.el('<div class="secacts"><span class="why">Native card due-date sync is off for you \u2014 authorize once to let logged events also set Trello\u2019s own due date (and its reminders).</span></div>');
-            var b = QMS.el('<button class="link blue">Enable</button>');
-            b.onclick = function(){ QMS.authorizeDueSync(t).then(function(){ ctx.refresh(); }, function(){}); };
-            row.appendChild(b);
-            mount.appendChild(row);
-            QMS.fit(t);
-          }).catch(function(){});
-        }
-      } else {
-        mount.appendChild(QMS.el('<div class="secacts"><span class="why">Due-date sync unavailable \u2014 no API key configured (see README \u00a7 due-date sync). Badges still track Next Due.</span></div>'));
-      }
+      /* read-only summary — logging and entry editing live in the editor
+         modal (Open, in the section header) */
 
       /* running history — append-only */
       mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Maintenance log</span>' +
@@ -964,23 +968,59 @@ QMS.register({
           (e.att ? '<a href="' + QMS.esc(e.att) + '" target="_blank" rel="noopener">attachment \u2197</a>' : '') +
           (e.c ? '<div class="lnote" style="font-style:italic">note compacted for storage</div>' : '') +
           '</span></div>');
-        if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
-          var eb = QMS.el('<button class="link ledit">edit</button>');
-          eb.onclick = function(){
-            QMS.pop(t, 'Edit Maintenance Entry', 'maintlog', {edit:e.t}, 430);
-          };
-          row.appendChild(eb);
-        }
         mount.appendChild(row);
       });
     });
+  },
+
+  /* ---- editor block: form + recent entries with edit links ---- */
+  editor: function(t, mount, ctx){
+    var self = this;
+    var draw = function(editTs){
+      mount.innerHTML = '<div class="ghead"><span class="gname">Maintenance &amp; Calibration</span></div>';
+      var fwrap = document.createElement('div');
+      mount.appendChild(fwrap);
+      formInto(t, fwrap, { editing: editTs||null, onDone: function(){ ctx.refresh(); } });
+      /* one-time due-date sync authorization lives here with the form */
+      if(QMS.dueSyncAvailable()){
+        var api; try{ api = t.getRestApi(); }catch(e){ api=null; }
+        if(api){
+          api.isAuthorized().then(function(ok){
+            if(ok) return;
+            var row = QMS.el('<div class="secacts"><span class="why">Due-date sync is off for you \u2014 authorize once so logged events also set Trello\u2019s own due date (and reminders).</span></div>');
+            var b = QMS.el('<button class="link blue">Enable</button>');
+            b.onclick = function(){ QMS.authorizeDueSync(t).then(function(){ ctx.refresh(); }, function(){}); };
+            row.appendChild(b); mount.appendChild(row);
+          }).catch(function(){});
+        }
+      }
+      getLog(t).then(function(log){
+        var recent = log.filter(function(e){ return e && !e.rl; }).slice(0, 6);
+        if(!recent.length) return;
+        mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Recent entries</span>' +
+          '<span class="why">append-only \u00b7 author-editable ' + Math.round(QMS.EDIT_WINDOW_MS/3600000) + 'h</span></div>'));
+        recent.forEach(function(e){
+          var row = QMS.el('<div class="le"><span class="lts"><span class="d">' + QMS.esc(QMS.fmtDate(e.d)) + '</span></span>' +
+            '<span class="lbody"><span class="l1"><span class="lnm">' + QMS.esc(TYPES[e.ty]||e.ty||'') + '</span>' +
+            '<span class="lby">' + QMS.esc(e.byN||'') + '</span></span></span></div>');
+          if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
+            var eb = QMS.el('<button class="link ledit">edit</button>');
+            eb.onclick = function(){ draw(e.t); };
+            row.appendChild(eb);
+          }
+          mount.appendChild(row);
+        });
+      });
+    };
+    draw(null);
   }
 });
 
-/* ---- popup view: Log Maintenance Event / edit-within-window ---- */
-QMS.views.maintlog = function(t, app){
-  document.body.classList.add('mode-popup');
-  var editTs = QMS.getParam('edit') ? +QMS.getParam('edit') : null;
+/* ---- form: Log Maintenance Event / edit-within-window (mounted by the editor) ---- */
+function formInto(t, app, opts){
+  opts = opts || {};
+  var editTs = opts.editing || null;
+  var done = opts.onDone || function(){};
 
   Promise.all([getMt(t), getLog(t), QMS.me(t), QMS.isWl(t)]).then(function(r){
     var mt=r[0], log=r[1], me=r[2], wl=r[3];
@@ -1059,7 +1099,7 @@ QMS.views.maintlog = function(t, app){
     else noteBits.push('Technician: ' + (me.fullName||me.username));
     $('#fnote').textContent = noteBits.join(' \u00b7 ');
 
-    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fcancel').onclick = function(){ done(); };
     $('#fsave').onclick = function(){
       var d = $('#fd').value;
       var ivRaw = $('#fiv').value;
@@ -1109,12 +1149,12 @@ QMS.views.maintlog = function(t, app){
         /* mirror Next Due onto Trello's native due date so assignees get
            Trello's own reminders too; skipped gracefully if not authorized */
         return due ? QMS.syncNativeDue(t, due) : null;
-      }).then(function(){ t.closePopup(); },
-              function(){ t.closePopup(); });
+      }).then(function(){ done(); },
+              function(){ done(); });
     };
     QMS.fit(t);
   });
-};
+}
 
 })();
 </script>
@@ -1208,26 +1248,23 @@ QMS.register({
         '<span class="fk">Billing reference</span>' + v(d&&d.br) +
         (st==='dec' ? '<span class="fk">Decline reason</span>' + v(d&&d.dr) : '') +
         '</div>';
-      var acts = QMS.el('<div class="secacts"></div>');
-      var b = QMS.el('<button class="qbtn ' + (d?'alt':'save') + ' sm">' + (d?'Edit Intake Info':'Enter Intake Info') + '</button>');
-      if(!ctx.wl){
-        b.disabled = true;
-        acts.appendChild(b);
-        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
-      } else {
-        b.onclick = function(){
-          QMS.pop(t, 'Project Intake', 'intake', null, 430);
-        };
-        acts.appendChild(b);
-      }
-      mount.appendChild(acts);
+      /* read-only summary — editing lives in the editor modal (Open \u2191) */
     });
+  },
+
+  /* ---- editor block: the intake form, mounted directly ---- */
+  editor: function(t, mount, ctx){
+    mount.innerHTML = '<div class="ghead"><span class="gname">Project Intake</span></div>';
+    var fwrap = document.createElement('div');
+    mount.appendChild(fwrap);
+    formInto(t, fwrap, { onDone: function(){ ctx.refresh(); } });
   }
 });
 
 /* ---- popup view: guided intake form (all fields in one place) ---- */
-QMS.views.intake = function(t, app){
-  document.body.classList.add('mode-popup');
+function formInto(t, app, opts){
+  opts = opts || {};
+  var done = opts.onDone || function(){};
   Promise.all([getIn(t), QMS.isWl(t)]).then(function(r){
     var d=r[0]||{}, wl=r[1];
     if(!wl){
@@ -1276,7 +1313,7 @@ QMS.views.intake = function(t, app){
     var syncDec = function(){ $('#fdrRow').hidden = $('#fst').value!=='dec'; QMS.fit(t); };
     $('#fst').onchange = syncDec; syncDec();
 
-    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fcancel').onclick = function(){ done(); };
     $('#fsave').onclick = function(){
       var warn = $('#fwarn');
       var svSel = Array.prototype.slice.call(f.querySelectorAll('#fsv input:checked')).map(function(i){ return i.value; });
@@ -1298,11 +1335,11 @@ QMS.views.intake = function(t, app){
       if(!out.rd) delete out.rd;
       warn.hidden=true;
       $('#fsave').disabled=true;
-      t.set('card','shared','in', out).then(function(){ t.closePopup(); }, function(){ t.closePopup(); });
+      t.set('card','shared','in', out).then(function(){ done(); }, function(){ done(); });
     };
     QMS.fit(t);
   });
-};
+}
 
 })();
 </script>
@@ -1390,19 +1427,8 @@ QMS.register({
             QMS.esc([d&&REASONS[d.rc], d&&d.rs].filter(Boolean).join(' \u2014 ')||'\u2014 not given') + '</span>' : '') +
         '</div>';
 
-      var acts = QMS.el('<div class="secacts"></div>');
-      var b = QMS.el('<button class="qbtn save sm">Log Inspection Result</button>');
-      if(!ctx.wl){
-        b.disabled = true;
-        acts.appendChild(b);
-        acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
-      } else {
-        b.onclick = function(){
-          QMS.pop(t, 'Log Inspection Result', 'inspectlog', null, 420);
-        };
-        acts.appendChild(b);
-      }
-      mount.appendChild(acts);
+      /* read-only summary — logging and entry editing live in the editor
+         modal (Open, in the section header) */
 
       mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Inspection history</span>' +
         '<span class="why">' + log.length + ' entr' + (log.length===1?'y':'ies') + ' \u00b7 append-only</span></div>'));
@@ -1431,23 +1457,46 @@ QMS.register({
           (e.att ? '<a href="' + QMS.esc(e.att) + '" target="_blank" rel="noopener">attachment \u2197</a>' : '') +
           (e.c ? '<div class="lnote" style="font-style:italic">note compacted for storage</div>' : '') +
           '</span></div>');
-        if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
-          var eb = QMS.el('<button class="link ledit">edit</button>');
-          eb.onclick = function(){
-            QMS.pop(t, 'Edit Inspection Entry', 'inspectlog', {edit:e.t}, 420);
-          };
-          row.appendChild(eb);
-        }
         mount.appendChild(row);
       });
     });
+  },
+
+  /* ---- editor block: form + recent entries with edit links ---- */
+  editor: function(t, mount, ctx){
+    var draw = function(editTs){
+      mount.innerHTML = '<div class="ghead"><span class="gname">Inspection &amp; Verification</span></div>';
+      var fwrap = document.createElement('div');
+      mount.appendChild(fwrap);
+      formInto(t, fwrap, { editing: editTs||null, onDone: function(){ ctx.refresh(); } });
+      getLog(t).then(function(log){
+        var recent = log.filter(function(e){ return e && !e.rl; }).slice(0, 6);
+        if(!recent.length) return;
+        mount.appendChild(QMS.el('<div class="loghead"><span class="sv-label">Recent entries</span>' +
+          '<span class="why">append-only \u00b7 author-editable ' + Math.round(QMS.EDIT_WINDOW_MS/3600000) + 'h</span></div>'));
+        recent.forEach(function(e){
+          var rc = e.r==='pass'?'green': e.r==='fail'?'red':'orange';
+          var row = QMS.el('<div class="le"><span class="lts"><span class="d">' + QMS.esc(QMS.fmtDate(e.d)) + '</span></span>' +
+            '<span class="lbody"><span class="l1"><span class="chip ' + rc + '">' + QMS.esc(RESULTS[e.r]||e.r||'') + '</span>' +
+            '<span class="lby">' + QMS.esc(e.byN||'') + '</span></span></span></div>');
+          if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
+            var eb = QMS.el('<button class="link ledit">edit</button>');
+            eb.onclick = function(){ draw(e.t); };
+            row.appendChild(eb);
+          }
+          mount.appendChild(row);
+        });
+      });
+    };
+    draw(null);
   }
 });
 
-/* ---- popup view: Log Inspection Result / edit-within-window ---- */
-QMS.views.inspectlog = function(t, app){
-  document.body.classList.add('mode-popup');
-  var editTs = QMS.getParam('edit') ? +QMS.getParam('edit') : null;
+/* ---- form: Log Inspection Result / edit-within-window (mounted by the editor) ---- */
+function formInto(t, app, opts){
+  opts = opts || {};
+  var editTs = opts.editing || null;
+  var done = opts.onDone || function(){};
 
   Promise.all([getLog(t), QMS.me(t), QMS.isWl(t)]).then(function(r){
     var log=r[0], me=r[1], wl=r[2];
@@ -1508,7 +1557,7 @@ QMS.views.inspectlog = function(t, app){
       ? ('Editing your entry \u2014 window closes ' + Math.round((editing.t+QMS.EDIT_WINDOW_MS-Date.now())/3600000) + 'h from now')
       : ('Inspector: ' + (me.fullName||me.username));
 
-    $('#fcancel').onclick = function(){ t.closePopup(); };
+    $('#fcancel').onclick = function(){ done(); };
     $('#fsave').onclick = function(){
       var warn = $('#fwarn');
       var d = $('#fd').value, res = $('#fr').value, rs = $('#frs').value.trim();
@@ -1554,11 +1603,11 @@ QMS.views.inspectlog = function(t, app){
       Promise.all([
         t.set('card','shared','ivl', newLog),
         t.set('card','shared','iv',  cur)
-      ]).then(function(){ t.closePopup(); }, function(){ t.closePopup(); });
+      ]).then(function(){ done(); }, function(){ done(); });
     };
     QMS.fit(t);
   });
-};
+}
 
 })();
 </script>
