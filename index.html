@@ -199,10 +199,10 @@
 var QMS = window.QMS = {};
 
 /* ----- identity / configuration ----- */
-QMS.VERSION = '1.5';
+QMS.VERSION = '1.6';
 /* Fallback shown by Power-Up Info if CHANGELOG.md can't be fetched.
    Keep in sync with the most recent CHANGELOG.md summary line. */
-QMS.LAST_CHANGE = 'Section now rebuilds only when card data actually changed (snapshot-skip) and resizes only when content height changed \u2014 buttons survive Trello render events. Access panel shows your own per-board authorization status.';
+QMS.LAST_CHANGE = 'Fixed dead form buttons: popups opened from the card-back section (intake, maintenance, inspection, classify-change) now sign their URLs, which Trello requires from non-connector iframes.';
 
 /* Native due-date sync (Module 1) requires the Trello REST API.
    Paste the Power-Up's API key from https://trello.com/power-ups/admin
@@ -525,6 +525,18 @@ QMS.initView = function(view){
   if(fn) fn(t, app);
 };
 
+/* ---- shared: open a popup from a section/other iframe ----
+   t.popup called from a non-connector iframe REQUIRES a signed URL;
+   unsigned URLs are rejected via a promise rejection, which looks like
+   “click does nothing” if uncaught. Sign per click (one-shot). */
+QMS.pop = function(t, title, view, params, height){
+  var u = QMS.url(view, params);
+  try{ if(t.signUrl) u = t.signUrl(u); }catch(e){}
+  var p = t.popup({ title:title, url:u, height:height });
+  if(p && p.catch) p.catch(function(err){ try{ console.error('TF-QMS popup failed:', title, err); }catch(e){} });
+  return p;
+};
+
 /* ---- shared: popup sizing ---- */
 QMS.fit = function(t, sel){
   var f=function(){
@@ -597,7 +609,7 @@ QMS.viewSection = function(t, app){
         if(ctx.wl){
           var chg = QMS.el('<button class="link">change</button>');
           chg.onclick = function(){
-            t.popup({ title:'Card Type', url:QMS.url('classify'), height:170 });
+            QMS.pop(t, 'Card Type', 'classify', null, 170);
           };
           head.appendChild(chg);
         }
@@ -903,7 +915,7 @@ QMS.register({
         acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
       } else {
         logBtn.onclick = function(){
-          t.popup({ title:'Log Maintenance Event', url:QMS.url('maintlog'), height:430 });
+          QMS.pop(t, 'Log Maintenance Event', 'maintlog', null, 430);
         };
         acts.appendChild(logBtn);
       }
@@ -955,7 +967,7 @@ QMS.register({
         if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
           var eb = QMS.el('<button class="link ledit">edit</button>');
           eb.onclick = function(){
-            t.popup({ title:'Edit Maintenance Entry', url:QMS.url('maintlog',{edit:e.t}), height:430 });
+            QMS.pop(t, 'Edit Maintenance Entry', 'maintlog', {edit:e.t}, 430);
           };
           row.appendChild(eb);
         }
@@ -1204,7 +1216,7 @@ QMS.register({
         acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
       } else {
         b.onclick = function(){
-          t.popup({ title:'Project Intake', url:QMS.url('intake'), height:430 });
+          QMS.pop(t, 'Project Intake', 'intake', null, 430);
         };
         acts.appendChild(b);
       }
@@ -1386,7 +1398,7 @@ QMS.register({
         acts.appendChild(QMS.el('<span class="why">QMS-authorized members only.</span>'));
       } else {
         b.onclick = function(){
-          t.popup({ title:'Log Inspection Result', url:QMS.url('inspectlog'), height:420 });
+          QMS.pop(t, 'Log Inspection Result', 'inspectlog', null, 420);
         };
         acts.appendChild(b);
       }
@@ -1422,7 +1434,7 @@ QMS.register({
         if(ctx.wl && QMS.canEdit(e, ctx.me.id)){
           var eb = QMS.el('<button class="link ledit">edit</button>');
           eb.onclick = function(){
-            t.popup({ title:'Edit Inspection Entry', url:QMS.url('inspectlog',{edit:e.t}), height:420 });
+            QMS.pop(t, 'Edit Inspection Entry', 'inspectlog', {edit:e.t}, 420);
           };
           row.appendChild(eb);
         }
