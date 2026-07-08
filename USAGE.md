@@ -142,6 +142,15 @@ you get Trello's own reminders. Optional; everything works without it.
   closed. Add a new entry instead.
 - **Buttons greyed out:** you're not on the QMS access list for that board —
   see "Who can write" above.
+- **"QMS: Card Type" button missing on an Internal card:** three things to
+  check, in order. (1) Authorization is **per-board** — being on the list on
+  the Equipment board doesn't carry to Daily Operations; open **Manage QMS
+  Access** on the board you're standing on — it now tells you directly
+  whether *you* are authorized there. (2) Trello puts Power-Up card buttons
+  in the card's actions area, sometimes tucked under a "Power-Ups" group
+  depending on Trello's card layout — scroll the card's right-hand/lower
+  actions. (3) The **card-buttons** capability must be enabled in the
+  Power-Up admin (README setup step 2).
 - **A change I just deployed isn't showing:** Trello caches connectors
   aggressively. Editors: bump `QMS.VERSION`; users: hard-refresh, or
   disable/re-enable the Power-Up on the board if it persists.

@@ -199,10 +199,10 @@
 var QMS = window.QMS = {};
 
 /* ----- identity / configuration ----- */
-QMS.VERSION = '1.4';
+QMS.VERSION = '1.5';
 /* Fallback shown by Power-Up Info if CHANGELOG.md can't be fetched.
    Keep in sync with the most recent CHANGELOG.md summary line. */
-QMS.LAST_CHANGE = 'Fixed remaining section flash (t.signUrl re-signed per poll; now signed once and cached per card), fixed classify-view scrollbar/height oscillation, enabled native due-date sync (public app key embedded).';
+QMS.LAST_CHANGE = 'Section now rebuilds only when card data actually changed (snapshot-skip) and resizes only when content height changed \u2014 buttons survive Trello render events. Access panel shows your own per-board authorization status.';
 
 /* Native due-date sync (Module 1) requires the Trello REST API.
    Paste the Power-Up's API key from https://trello.com/power-ups/admin
@@ -307,7 +307,7 @@ QMS.setWl = function(t, wl){ return t.set('board','shared','qmsWl', wl); };
 QMS.isWl = function(t){
   return Promise.all([QMS.getWl(t), QMS.me(t)]).then(function(r){
     var wl=r[0], me=r[1];
-    return wl.some(function(e){ return e && e.id===me.id; });
+    return wl.some(function(e){ return e && String(e.id)===String(me.id); });
   }).catch(function(){ return false; });
 };
 
@@ -527,7 +527,16 @@ QMS.initView = function(view){
 
 /* ---- shared: popup sizing ---- */
 QMS.fit = function(t, sel){
-  var f=function(){ try{ t.sizeTo(sel||'#app'); }catch(e){} };
+  var f=function(){
+    try{
+      var el = document.querySelector(sel||'#app');
+      var hEl = el || document.body;
+      var hh = Math.ceil(hEl.getBoundingClientRect().height);
+      if(hh && Math.abs(hh - (QMS._lastFit||0)) <= 2) return;  /* steady — don't jiggle */
+      if(hh) QMS._lastFit = hh;
+      t.sizeTo(sel||'#app');
+    }catch(e){}
+  };
   f(); [120,400,900].forEach(function(ms){ setTimeout(f, ms); });
 };
 
@@ -539,11 +548,17 @@ QMS.viewSection = function(t, app){
   document.documentElement.style.overflow = 'hidden';
   document.body.style.overflow = 'hidden';
   var kind = QMS.getParam('kind');
-  var render = function(){
-    Promise.all([ QMS.isWl(t), QMS.me(t),
-                  kind==='ops' ? t.get('card','shared','qt') : Promise.resolve(null) ])
+  var lastSnap = null;
+  var render = function(force){
+    /* One fetch of the card's entire shared blob covers qt + every module's
+       data, so the snapshot detects any real change in one comparison. */
+    Promise.all([ QMS.isWl(t), QMS.me(t), t.get('card','shared') ])
     .then(function(r){
-      var ctx = { wl:r[0], me:r[1], qt:r[2], refresh:render };
+      var blob = r[2]||{};
+      var snap = JSON.stringify([r[0], r[1]&&r[1].id, blob]);
+      if(!force && snap===lastSnap) return;   /* nothing changed — leave the DOM alone */
+      lastSnap = snap;
+      var ctx = { wl:r[0], me:r[1], qt:(kind==='ops'?blob.qt:null), refresh:function(){ render(true); } };
       app.innerHTML = '';
       if(kind==='ops' && !ctx.qt){
         /* neutral classification prompt — the only QMS UI until typed */
@@ -638,10 +653,15 @@ QMS.viewAccess = function(t, app){
   var render = function(){
     Promise.all([QMS.getWl(t), QMS.me(t), t.board('members')]).then(function(r){
       var wl=r[0], me=r[1], members=(r[2]&&r[2].members)||[];
-      var meIn = wl.some(function(e){ return e.id===me.id; });
+      var meIn = wl.some(function(e){ return String(e.id)===String(me.id); });
       app.innerHTML='';
       app.appendChild(QMS.el('<div class="ovhead"><span class="ovt">Manage QMS Access</span>' +
         '<span class="ovn">' + wl.length + ' authorized</span></div>'));
+      app.appendChild(QMS.el('<div class="notice">' +
+        (meIn ? '<b>You are QMS-authorized on this board.</b>'
+              : '<b>You are not QMS-authorized on this board.</b>') +
+        ' Authorization is per-board \u2014 being on the list on one board does not carry to the other. ' +
+        'On Internal cards, authorized members reach the type control via the \u201cQMS: Card Type\u201d button in the card\u2019s actions/Power-Ups area.</div>'));
 
       if(wl.length===0){
         /* Seeding: with an empty whitelist there is no one to approve anyone,
